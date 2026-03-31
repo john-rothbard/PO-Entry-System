@@ -1,0 +1,45 @@
+export const DEFAULT_CONFIG = {
+  retailers: [
+    { id: "ret_1", name: "Nordstrom", shipStationStoreId: 12345, salesChannel: "Nordstrom" },
+    { id: "ret_2", name: "Target", shipStationStoreId: 12346, salesChannel: "Target" },
+    { id: "ret_3", name: "Whole Foods", shipStationStoreId: 12347, salesChannel: "Whole Foods" },
+    { id: "ret_4", name: "REI", shipStationStoreId: 12348, salesChannel: "REI" },
+    { id: "ret_5", name: "Costco", shipStationStoreId: 12349, salesChannel: "Costco" },
+  ],
+  masterSkus: [
+    { sku: "BW-12", name: "Blue Widget 12oz", category: "Widgets" },
+    { sku: "BW-16", name: "Blue Widget 16oz", category: "Widgets" },
+    { sku: "RW-12", name: "Red Widget 12oz", category: "Widgets" },
+    { sku: "RW-16", name: "Red Widget 16oz", category: "Widgets" },
+    { sku: "GG-SM", name: "Green Gadget Small", category: "Gadgets" },
+    { sku: "GG-MD", name: "Green Gadget Medium", category: "Gadgets" },
+    { sku: "GG-LG", name: "Green Gadget Large", category: "Gadgets" },
+    { sku: "PP-100", name: "Purple Pack 100ct", category: "Packs" },
+    { sku: "PP-250", name: "Purple Pack 250ct", category: "Packs" },
+    { sku: "PP-500", name: "Purple Pack 500ct", category: "Packs" },
+    { sku: "OT-A1", name: "Orange Thing Alpha", category: "Things" },
+    { sku: "OT-B2", name: "Orange Thing Beta", category: "Things" },
+    { sku: "YS-01", name: "Yellow Stuff Original", category: "Stuff" },
+    { sku: "YS-02", name: "Yellow Stuff Extra", category: "Stuff" },
+    { sku: "SS-TN", name: "Silver Set Tin", category: "Sets" },
+    { sku: "SS-BX", name: "Silver Set Box", category: "Sets" },
+    { sku: "DL-8", name: "Deluxe Line 8pk", category: "Deluxe" },
+    { sku: "DL-12", name: "Deluxe Line 12pk", category: "Deluxe" },
+    { sku: "DL-24", name: "Deluxe Line 24pk", category: "Deluxe" },
+    { sku: "EC-01", name: "Eco Compact", category: "Eco" },
+  ],
+  retailerAliases: {
+    ret_1: { "BW-12": "Nordstrom Blue Widget 12oz", "BW-16": "Nordstrom Blue Widget 16oz", "GG-SM": "N-Green Gadget Sm", "GG-MD": "N-Green Gadget Md", "GG-LG": "N-Green Gadget Lg", "PP-100": "Nordstrom Purple 100", "DL-8": "NORD-DLX-8", "DL-12": "NORD-DLX-12" },
+    ret_2: { "BW-12": "TGT-BLU-12OZ", "BW-16": "TGT-BLU-16OZ", "RW-12": "TGT-RED-12OZ", "RW-16": "TGT-RED-16OZ", "PP-100": "TGT-PURP-100", "PP-250": "TGT-PURP-250", "PP-500": "TGT-PURP-500", "EC-01": "TGT-ECO-COMPACT" },
+    ret_3: { "GG-SM": "WF Green Gadget S", "GG-MD": "WF Green Gadget M", "GG-LG": "WF Green Gadget L", "YS-01": "WF-YELLOW-ORIG", "YS-02": "WF-YELLOW-XTRA", "EC-01": "WF-ECO-1" },
+    ret_4: { "OT-A1": "REI-ORNG-ALPHA", "OT-B2": "REI-ORNG-BETA", "SS-TN": "REI Silver Tin Set", "SS-BX": "REI Silver Box Set", "DL-8": "REI-DLX-8PK", "DL-12": "REI-DLX-12PK", "DL-24": "REI-DLX-24PK" },
+    ret_5: { "BW-12": "COST-BW12", "BW-16": "COST-BW16", "RW-12": "COST-RW12", "RW-16": "COST-RW16", "PP-250": "COST-PP250", "PP-500": "COST-PP500", "DL-24": "COST-DLX24", "EC-01": "COST-ECO" },
+  },
+};
+
+export const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+  "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+  "VA","WA","WV","WI","WY","DC",
+];
