@@ -34,7 +34,7 @@ function AddressFields({ prefix, data, errors, updateField }) {
   );
 }
 
-export default function POForm({ config, connected, onSubmit }) {
+export default function POForm({ config, onSubmit }) {
   const emptyForm = {
     retailerId: "", poNumber: "",
     orderDate: new Date().toISOString().split("T")[0],
@@ -340,14 +340,6 @@ export default function POForm({ config, connected, onSubmit }) {
             style={{ width: "100%", justifyContent: "center", marginTop: 20 }}>
             {submitting ? "Submitting..." : "Submit Order to ShipStation"}
           </Button>
-          {!connected && (
-            <div style={{
-              marginTop: 12, padding: "8px 12px", background: "var(--warning-bg)",
-              borderRadius: "var(--radius)", fontSize: 12, color: "var(--warning)",
-            }}>
-              ⚠ ShipStation API not configured — orders will validate but not send. Add credentials to .env
-            </div>
-          )}
         </Card>
 
         {form.lineItems.length > 0 && (

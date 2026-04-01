@@ -1,17 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, isConfigured, loadConfig, saveConfig as persistConfig, exportConfigFile, importConfigFile } from './api';
+import { initGoogleAuth, signIn, signOut, isSignedIn, getUser } from './auth';
 import { DEFAULT_CONFIG } from './config';
 import { globalCSS, Icons, Badge, Button, Card, Toast } from './components';
 import AdminPanel from './AdminPanel';
 import POForm from './POForm';
 
+const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
 export default function App() {
   const [config, setConfig] = useState(() => loadConfig() || DEFAULT_CONFIG);
-  const [connected, setConnected] = useState(isConfigured());
+  const configured = isConfigured();
+  const [signedIn, setSignedIn] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [toast, setToast] = useState(null);
   const [recentOrders, setRecentOrders] = useState([]);
-  const [connectionTested, setConnectionTested] = useState(false);
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type });
@@ -20,36 +25,41 @@ export default function App() {
   // Persist config on change
   useEffect(() => { persistConfig(config); }, [config]);
 
-  // Test connection on mount if configured
+  // Initialize Google auth on mount
   useEffect(() => {
-    if (connected && !connectionTested) {
-      api.testConnection()
-        .then((res) => {
-          setConnectionTested(true);
-          console.log('ShipStation connection verified:', res.message);
-        })
-        .catch((err) => {
-          console.warn('ShipStation connection test failed:', err.message);
-          setConnectionTested(true);
-        });
+    if (!configured) return;
+    initGoogleAuth(CLIENT_ID).catch(() => {});
+  }, [configured]);
+
+  const handleSignIn = async () => {
+    setAuthLoading(true);
+    try {
+      await signIn(CLIENT_ID);
+      setSignedIn(true);
+      setUser(getUser());
+    } catch (err) {
+      if (err.message === 'SHOW_BUTTON') {
+        // One-tap was suppressed — show a message to use the button
+        showToast('Click the Google Sign-In button to continue.', 'warning');
+      } else {
+        showToast('Sign-in failed: ' + err.message, 'error');
+      }
+    } finally {
+      setAuthLoading(false);
     }
-  }, [connected, connectionTested]);
+  };
+
+  const handleSignOut = () => {
+    signOut();
+    setSignedIn(false);
+    setUser(null);
+  };
 
   const handleSetConfig = (updater) => {
     setConfig((prev) => typeof updater === 'function' ? updater(prev) : updater);
   };
 
-  // ── Submit order ──────────────────────────────────────────
   const handleSubmitOrder = async (payload, retailer) => {
-    if (!connected) {
-      setRecentOrders((prev) => [...prev, {
-        retailer: retailer?.name, poNumber: payload.orderNumber,
-        status: "demo", timestamp: new Date().toLocaleTimeString(),
-      }]);
-      showToast(`Demo: Order ${payload.orderNumber} validated. Configure .env to send to ShipStation.`, "warning");
-      return;
-    }
-
     try {
       const result = await api.createOrder(payload);
       setRecentOrders((prev) => [...prev, {
@@ -71,11 +81,10 @@ export default function App() {
   const handleFetchStores = async () => {
     try {
       const data = await api.getStores();
-      const stores = data.stores || [];
-      const list = Array.isArray(stores) ? stores : [];
-      showToast(`Found ${list.length} stores. Check browser console (F12) for details.`);
+      const stores = Array.isArray(data.stores) ? data.stores : [];
+      showToast(`Found ${stores.length} stores. Check browser console (F12) for details.`);
       console.log('=== ShipStation Stores ===');
-      console.table(list.map((s) => ({ storeId: s.storeId, name: s.storeName, marketplace: s.marketplaceName })));
+      console.table(stores.map((s) => ({ storeId: s.storeId, name: s.storeName, marketplace: s.marketplaceName })));
     } catch (err) {
       showToast(`Could not fetch stores: ${err.message}`, "error");
     }
@@ -85,7 +94,6 @@ export default function App() {
     try {
       const res = await api.testConnection();
       showToast(res.message || 'Connected!');
-      setConnectionTested(true);
     } catch (err) {
       showToast(`Connection failed: ${err.message}`, "error");
     }
@@ -100,11 +108,59 @@ export default function App() {
     } catch (err) { showToast(err.message, "error"); }
   };
 
+  // ── Not configured ────────────────────────────────────────
+  if (!configured) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <style>{globalCSS}</style>
+        <Card style={{ maxWidth: 480, width: "100%", margin: 24 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Setup Required</h2>
+          <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+            The <code style={{ fontFamily: "var(--mono)", background: "var(--bg-input)", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>.env</code> file is missing or incomplete.
+            Add <code style={{ fontFamily: "var(--mono)", background: "var(--bg-input)", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>VITE_GAS_URL</code> and{' '}
+            <code style={{ fontFamily: "var(--mono)", background: "var(--bg-input)", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>VITE_GOOGLE_CLIENT_ID</code> then restart the dev server.
+          </p>
+        </Card>
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </div>
+    );
+  }
+
+  // ── Sign-in screen ────────────────────────────────────────
+  if (!signedIn) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <style>{globalCSS}</style>
+        <Card style={{ maxWidth: 400, width: "100%", margin: 24, textAlign: "center" }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: "var(--radius)", background: "var(--accent)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: 700, fontSize: 22, color: "#fff", margin: "0 auto 16px",
+          }}>PO</div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>PO Entry System</h1>
+          <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 28 }}>
+            Sign in with your <strong>@honeydewsleep.com</strong> account to continue.
+          </p>
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={handleSignIn}
+            disabled={authLoading}
+            style={{ width: "100%", justifyContent: "center" }}
+          >
+            {authLoading ? 'Signing in...' : 'Sign in with Google'}
+          </Button>
+        </Card>
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </div>
+    );
+  }
+
+  // ── Main app ──────────────────────────────────────────────
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <style>{globalCSS}</style>
 
-      {/* HEADER */}
       <header style={{
         padding: "14px 24px", borderBottom: "1px solid var(--border)", background: "var(--bg-card)",
         display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -118,57 +174,22 @@ export default function App() {
             <h1 style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.2 }}>PO Entry System</h1>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>ShipStation via Google Apps Script</p>
           </div>
-          <Badge variant={connected ? "success" : "warning"}>
-            {connected ? "Connected" : "Demo Mode"}
-          </Badge>
+          <Badge variant="success">Connected</Badge>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {connected && (
-            <Button variant="ghost" size="sm" onClick={handleTestConnection} icon={<Icons.server size={16} />}>
-              Test Connection
-            </Button>
-          )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Button variant="ghost" size="sm" onClick={handleTestConnection} icon={<Icons.server size={16} />}>
+            Test Connection
+          </Button>
           <Button variant="ghost" size="sm" onClick={handleExport} icon={<Icons.download size={16} />}>Export</Button>
           <Button variant="ghost" size="sm" onClick={handleImport} icon={<Icons.upload size={16} />}>Import</Button>
           <Button variant="secondary" size="sm" onClick={() => setShowAdmin(true)} icon={<Icons.settings size={16} />}>Config</Button>
+          <div style={{ width: 1, height: 24, background: "var(--border)", margin: "0 4px" }} />
+          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{user?.name || user?.email}</div>
+          <Button variant="ghost" size="sm" onClick={handleSignOut}>Sign out</Button>
         </div>
       </header>
 
-      {/* SETUP BANNER */}
-      {!connected && (
-        <div style={{
-          maxWidth: 1200, margin: "20px auto 0", padding: "0 24px",
-        }}>
-          <Card style={{ background: "linear-gradient(135deg, #1a1f2e, var(--bg-card))", border: "1px solid var(--accent)", borderColor: "rgba(79,124,255,0.3)" }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-              <Icons.alert color="var(--warning)" /> Setup Required
-            </h3>
-            <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 16, lineHeight: 1.6 }}>
-              To send orders to ShipStation, you need to set up the Google Apps Script middleware and configure your <code style={{ fontFamily: "var(--mono)", background: "var(--bg-input)", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>.env</code> file.
-              See the <strong>SETUP-GUIDE.md</strong> included in this project for step-by-step instructions.
-              Until then, the form works in demo mode — everything validates but nothing sends.
-            </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 13 }}>
-              <div style={{ padding: "6px 12px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-muted)" }}>Step 1:</span> Create Google Sheet + Apps Script
-              </div>
-              <div style={{ padding: "6px 12px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-muted)" }}>Step 2:</span> Deploy Apps Script as web app
-              </div>
-              <div style={{ padding: "6px 12px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-muted)" }}>Step 3:</span> Add URL + secret to .env
-              </div>
-              <div style={{ padding: "6px 12px", background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-muted)" }}>Step 4:</span> Restart <code style={{ fontFamily: "var(--mono)", fontSize: 12 }}>npm run dev</code>
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* MAIN */}
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
-        {/* Recent Orders */}
         {recentOrders.length > 0 && (
           <Card style={{ marginBottom: 20 }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
@@ -182,8 +203,8 @@ export default function App() {
                   border: "1px solid var(--border)", fontSize: 13,
                 }}>
                   <span style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    <Badge variant={o.status === "success" ? "success" : o.status === "demo" ? "warning" : "danger"}>
-                      {o.status === "success" ? "Sent" : o.status === "demo" ? "Demo" : "Error"}
+                    <Badge variant={o.status === "success" ? "success" : "danger"}>
+                      {o.status === "success" ? "Sent" : "Error"}
                     </Badge>
                     <span style={{ fontWeight: 600 }}>{o.retailer}</span>
                     <span style={{ fontFamily: "var(--mono)", color: "var(--text-secondary)" }}>PO# {o.poNumber}</span>
@@ -198,16 +219,15 @@ export default function App() {
           </Card>
         )}
 
-        <POForm config={config} connected={connected} onSubmit={handleSubmitOrder} />
+        <POForm config={config} onSubmit={handleSubmitOrder} />
       </main>
 
-      {/* Admin Modal */}
       {showAdmin && (
         <AdminPanel
           config={config}
           setConfig={handleSetConfig}
           onClose={() => setShowAdmin(false)}
-          onFetchStores={connected ? handleFetchStores : null}
+          onFetchStores={handleFetchStores}
         />
       )}
 

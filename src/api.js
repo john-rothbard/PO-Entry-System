@@ -1,29 +1,34 @@
 // ── Google Apps Script API Client ────────────────────────────
-// All requests go to your GAS web app URL with the shared secret.
-// The secret prevents unauthorized use of your endpoint.
+// All requests go to your GAS web app URL with a Google ID token.
+// The token is verified server-side against Google's tokeninfo endpoint.
+
+import { getCredential } from './auth';
 
 const GAS_URL = import.meta.env.VITE_GAS_URL;
-const APP_SECRET = import.meta.env.VITE_APP_SECRET;
 
 async function gasRequest(action, payload) {
   if (!GAS_URL || GAS_URL.includes('YOUR_DEPLOYMENT_ID')) {
     throw new Error('Google Apps Script URL not configured. Check your .env file.');
   }
 
+  const idToken = getCredential();
+  if (!idToken) {
+    throw new Error('Not signed in.');
+  }
+
   const res = await fetch(GAS_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' }, // GAS requires text/plain for CORS
     body: JSON.stringify({
-      appSecret: APP_SECRET,
+      idToken,
       _origin: window.location.origin,
       action,
       payload,
     }),
   });
 
-  // GAS web apps sometimes redirect (302) — fetch follows automatically
   const text = await res.text();
-  
+
   let data;
   try {
     data = JSON.parse(text);
@@ -45,7 +50,13 @@ export const api = {
 };
 
 export function isConfigured() {
-  return GAS_URL && !GAS_URL.includes('YOUR_DEPLOYMENT_ID') && APP_SECRET && APP_SECRET !== 'CHANGE_ME_TO_MATCH_YOUR_APPS_SCRIPT';
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  return (
+    GAS_URL &&
+    !GAS_URL.includes('YOUR_DEPLOYMENT_ID') &&
+    clientId &&
+    !clientId.includes('YOUR_GOOGLE_CLIENT_ID')
+  );
 }
 
 // ── Local config persistence ────────────────────────────────

@@ -22,14 +22,15 @@ var CONFIG = {
   SHIPSTATION_API_KEY: 'YOUR_SHIPSTATION_API_KEY',
   SHIPSTATION_API_SECRET: 'YOUR_SHIPSTATION_API_SECRET',
 
-  // Shared secret — MUST match what's in your React app
-  // Generate something random, e.g.: crypto.randomUUID() in browser console
-  // Example: 'a7b3f9e2-4d1c-8f6a-2e5b-9c0d3f7a1b4e'
-  APP_SECRET: 'CHANGE_ME_TO_A_RANDOM_STRING',
+  // Your Google OAuth Client ID (same one used in the React app)
+  GOOGLE_CLIENT_ID: '555633268289-1qgl84b08oehm88dm3q2ijlhqo508d3f.apps.googleusercontent.com',
 
-  // Allowed origins — add your Netlify URL here after deploying
+  // Only allow sign-ins from this Google Workspace domain
+  ALLOWED_DOMAIN: 'honeydewsleep.com',
+
+  // Allowed origins — add your GitHub Pages URL here after deploying
   // Leave empty to allow all origins (fine for local dev, lock down for production)
-  // Example: ['https://your-app.netlify.app', 'http://localhost:3000']
+  // Example: ['https://john-rothbard.github.io', 'http://localhost:3000']
   ALLOWED_ORIGINS: [],
 };
 
@@ -63,12 +64,13 @@ function doPost(e) {
       }
     }
 
-    // ── SECURITY CHECK ──────────────────────────────────────
-    if (!body.appSecret || body.appSecret !== CONFIG.APP_SECRET) {
-      logSecurity_('AUTH_FAILED', e);
+    // ── GOOGLE ID TOKEN VERIFICATION ───────────────────────
+    var authResult = verifyGoogleToken_(body.idToken);
+    if (!authResult.valid) {
+      logSecurity_('AUTH_FAILED: ' + authResult.reason, e);
       return createCorsResponse({
         error: 'Unauthorized',
-        message: 'Invalid or missing authentication'
+        message: authResult.reason
       }, 403);
     }
 
@@ -107,6 +109,39 @@ function doGet(e) {
     service: 'PO Entry System',
     timestamp: new Date().toISOString() 
   }, 200);
+}
+
+// ============================================================
+// GOOGLE TOKEN VERIFICATION
+// ============================================================
+
+function verifyGoogleToken_(idToken) {
+  if (!idToken) {
+    return { valid: false, reason: 'No ID token provided' };
+  }
+  try {
+    var response = UrlFetchApp.fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + idToken,
+      { muteHttpExceptions: true }
+    );
+    var code = response.getResponseCode();
+    if (code !== 200) {
+      return { valid: false, reason: 'Invalid or expired token' };
+    }
+    var claims = JSON.parse(response.getContentText());
+    if (claims.aud !== CONFIG.GOOGLE_CLIENT_ID) {
+      return { valid: false, reason: 'Token audience mismatch' };
+    }
+    if (claims.email_verified !== 'true' && claims.email_verified !== true) {
+      return { valid: false, reason: 'Email not verified' };
+    }
+    if (claims.hd !== CONFIG.ALLOWED_DOMAIN) {
+      return { valid: false, reason: 'Domain not allowed: ' + claims.hd };
+    }
+    return { valid: true, email: claims.email, name: claims.name };
+  } catch (err) {
+    return { valid: false, reason: 'Token verification error: ' + err.message };
+  }
 }
 
 // ============================================================
@@ -333,25 +368,14 @@ function isRateLimited_() {
 }
 
 // ============================================================
-// UTILITY: Generate a secret (run this once manually)
+// UTILITY: Test auth setup (run this once manually to verify)
 // ============================================================
-// Go to Apps Script editor, select this function, and click Run.
-// Check the Execution Log for your generated secret.
+// Select this function in the Apps Script editor and click Run.
+// It will log your current CONFIG values (without secrets).
 
-function generateSecret() {
-  var chars = 'abcdef0123456789';
-  var secret = '';
-  for (var i = 0; i < 8; i++) {
-    if (i > 0) secret += '-';
-    for (var j = 0; j < 4; j++) {
-      secret += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-  }
-  Logger.log('');
-  Logger.log('========================================');
-  Logger.log('Your generated secret: ' + secret);
-  Logger.log('========================================');
-  Logger.log('');
-  Logger.log('Put this in CONFIG.APP_SECRET in this script');
-  Logger.log('AND in your React app\'s .env file as VITE_APP_SECRET');
+function testAuthSetup() {
+  Logger.log('GOOGLE_CLIENT_ID set: ' + (CONFIG.GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID'));
+  Logger.log('ALLOWED_DOMAIN: ' + CONFIG.ALLOWED_DOMAIN);
+  Logger.log('SHIPSTATION_API_KEY set: ' + (CONFIG.SHIPSTATION_API_KEY !== 'YOUR_SHIPSTATION_API_KEY'));
+  Logger.log('ALLOWED_ORIGINS: ' + JSON.stringify(CONFIG.ALLOWED_ORIGINS));
 }
