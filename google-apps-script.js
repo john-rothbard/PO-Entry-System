@@ -28,6 +28,11 @@ var CONFIG = {
   // Only allow sign-ins from this Google Workspace domain
   ALLOWED_DOMAIN: 'honeydewsleep.com',
 
+  // Google Sheet ID — get this from the sheet URL:
+  // https://docs.google.com/spreadsheets/d/THIS_PART/edit
+  // Required because getActiveSpreadsheet() doesn't work in web app context
+  SPREADSHEET_ID: '1CcxXIzp0bcqf0Rki9aJZah_skgf0addCdN6O-JF4iYk',
+
   // Allowed origins — add your GitHub Pages URL here after deploying
   // Leave empty to allow all origins (fine for local dev, lock down for production)
   // Example: ['https://john-rothbard.github.io', 'http://localhost:3000']
@@ -87,7 +92,7 @@ function doPost(e) {
 
     switch (action) {
       case 'create_order':
-        return handleCreateOrder_(body.payload);
+        return handleCreateOrder_(body.payload, authResult.email);
       case 'get_stores':
         return handleGetStores_();
       case 'test_connection':
@@ -184,18 +189,15 @@ function shipStationRequest_(endpoint, method, payload) {
 }
 
 // ── Create Order ────────────────────────────────────────────
-function handleCreateOrder_(payload) {
+function handleCreateOrder_(payload, userEmail) {
   if (!payload || !payload.orderNumber) {
     return createCorsResponse({ error: 'Missing order payload' }, 400);
   }
-  
+
   try {
-    // 1. Send to ShipStation
-    const result = shipStationRequest_('/orders/createorder', 'post', payload);
-    
-    // 2. Log to Google Sheet
-    logOrder_(payload, result, 'SUCCESS');
-    
+    var result = shipStationRequest_('/orders/createorder', 'post', payload);
+    logOrder_(payload, result, 'SUCCESS', userEmail);
+
     return createCorsResponse({
       success: true,
       orderId: result.orderId,
@@ -203,10 +205,9 @@ function handleCreateOrder_(payload) {
       orderKey: result.orderKey,
       message: 'Order created in ShipStation',
     });
-    
+
   } catch (err) {
-    // Log the failure too
-    logOrder_(payload, null, 'FAILED: ' + err.message);
+    logOrder_(payload, null, 'FAILED: ' + err.message, userEmail);
     return createCorsResponse({ error: err.message }, 502);
   }
 }
@@ -241,63 +242,57 @@ function handleTestConnection_() {
 // ============================================================
 
 function getOrCreateSheet_(name) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(name);
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
   }
   return sheet;
 }
 
-function logOrder_(payload, result, status) {
+function logOrder_(payload, result, status, userEmail) {
   try {
-    const sheet = getOrCreateSheet_('Order Log');
-    
-    // Add headers if sheet is empty
+    var sheet = getOrCreateSheet_('Order Log');
+
     if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        'Timestamp',
-        'Status', 
-        'PO Number',
-        'Retailer',
-        'Store ID',
-        'Ship To Name',
-        'Ship To City',
-        'Ship To State',
-        'Items Count',
-        'Items Detail',
-        'Shipping',
-        'Tax',
-        'Order Total',
-        'SS Order ID',
-        'SS Order Key',
-      ]);
-      // Bold the header row
-      sheet.getRange(1, 1, 1, 15).setFontWeight('bold');
+      var headers = [
+        'Timestamp', 'Status', 'Email Address', 'Retailer',
+        'PO Number', 'Order Date',
+        'Ship To Name', 'Ship To Address 1', 'Ship To Address 2',
+        'Ship To City', 'Ship To State', 'Ship To Zip',
+        'Bill To Name', 'Bill To Address 1', 'Bill To Address 2',
+        'Bill To City', 'Bill To State', 'Bill To Zip',
+        'Items Detail', 'Shipping', 'Tax', 'Order Total',
+        'SS Order ID', 'SS Order Key',
+      ];
+      sheet.appendRow(headers);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
       sheet.setFrozenRows(1);
     }
-    
-    // Calculate total
-    const itemsTotal = (payload.items || []).reduce(function(sum, item) {
+
+    var itemsTotal = (payload.items || []).reduce(function(sum, item) {
       return sum + (item.quantity * item.unitPrice);
     }, 0);
-    const orderTotal = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
-    
-    // Items detail string
-    const itemsDetail = (payload.items || []).map(function(item) {
+    var orderTotal = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
+
+    var itemsDetail = (payload.items || []).map(function(item) {
       return item.sku + ' x' + item.quantity + ' @$' + item.unitPrice;
     }).join('; ');
-    
+
+    var ship = payload.shipTo || {};
+    var bill = payload.billTo || {};
+
     sheet.appendRow([
       new Date(),
       status,
-      payload.orderNumber || '',
+      userEmail || '',
       payload.advancedOptions ? payload.advancedOptions.customField1 : '',
-      payload.advancedOptions ? payload.advancedOptions.storeId : '',
-      payload.shipTo ? payload.shipTo.name : '',
-      payload.shipTo ? payload.shipTo.city : '',
-      payload.shipTo ? payload.shipTo.state : '',
-      (payload.items || []).length,
+      payload.orderNumber || '',
+      payload.orderDate || '',
+      ship.name || '', ship.street1 || '', ship.street2 || '',
+      ship.city || '', ship.state || '', ship.postalCode || '',
+      bill.name || '', bill.street1 || '', bill.street2 || '',
+      bill.city || '', bill.state || '', bill.postalCode || '',
       itemsDetail,
       payload.shippingAmount || 0,
       payload.taxAmount || 0,
@@ -305,16 +300,15 @@ function logOrder_(payload, result, status) {
       result ? result.orderId : '',
       result ? result.orderKey : '',
     ]);
-    
-    // Color code the status
-    const lastRow = sheet.getLastRow();
-    const statusCell = sheet.getRange(lastRow, 2);
+
+    var lastRow = sheet.getLastRow();
+    var statusCell = sheet.getRange(lastRow, 2);
     if (status === 'SUCCESS') {
       statusCell.setBackground('#d4edda').setFontColor('#155724');
     } else {
       statusCell.setBackground('#f8d7da').setFontColor('#721c24');
     }
-    
+
   } catch (err) {
     Logger.log('Failed to log order: ' + err.message);
   }
