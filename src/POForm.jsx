@@ -281,7 +281,7 @@ export default function POForm({ config, onSubmit }) {
 
       {/* RIGHT COLUMN — SUMMARY */}
       <div style={{ position: "sticky", top: 20 }}>
-        <Card style={{ background: "linear-gradient(135deg, var(--bg-card), #1a1f2e)" }}>
+        <Card style={{ background: "var(--bg-card)" }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
             <Icons.clipboard /> Order Summary
           </h3>

@@ -2,6 +2,17 @@
 
 let _credential = null;  // raw JWT string
 let _user = null;        // { email, name }
+let _refreshTimer = null;
+
+function persistSession() {
+  if (_credential && _user) {
+    sessionStorage.setItem('po_auth', JSON.stringify({ credential: _credential, user: _user }));
+  }
+}
+
+function clearSession() {
+  sessionStorage.removeItem('po_auth');
+}
 
 // Wait for the GSI library to load (it's async in index.html)
 function waitForGoogle() {
@@ -47,6 +58,7 @@ export function signIn(clientId) {
         }
         _credential = response.credential;
         _user = { email: payload.email, name: payload.name };
+        persistSession();
         resolve({ credential: _credential, ..._user });
       },
       auto_select: false,
@@ -61,11 +73,16 @@ export function signIn(clientId) {
 }
 
 export function signOut() {
+  if (_refreshTimer) {
+    clearTimeout(_refreshTimer);
+    _refreshTimer = null;
+  }
   if (_user?.email) {
     google.accounts.id.revoke(_user.email, () => {});
   }
   _credential = null;
   _user = null;
+  clearSession();
 }
 
 export function getCredential() {
@@ -90,4 +107,79 @@ export function isTokenExpiringSoon() {
   const payload = decodeJwtPayload(_credential);
   if (!payload) return true;
   return payload.exp * 1000 < Date.now() + 60_000;
+}
+
+// Restore a previous session from sessionStorage (call on app mount)
+export function tryRestoreSession() {
+  try {
+    const saved = sessionStorage.getItem('po_auth');
+    if (!saved) return false;
+    const { credential, user } = JSON.parse(saved);
+    const payload = decodeJwtPayload(credential);
+    if (!payload || payload.exp * 1000 <= Date.now()) {
+      sessionStorage.removeItem('po_auth');
+      return false;
+    }
+    _credential = credential;
+    _user = user;
+    return true;
+  } catch {
+    sessionStorage.removeItem('po_auth');
+    return false;
+  }
+}
+
+// Schedule a silent token refresh.
+// Warns via onExpiringSoon 5min before expiry, attempts refresh 2min before.
+export function scheduleTokenRefresh(clientId, { onRefreshed, onExpired, onExpiringSoon }) {
+  if (_refreshTimer) clearTimeout(_refreshTimer);
+
+  const payload = decodeJwtPayload(_credential);
+  if (!payload) return;
+
+  const msUntilWarning = (payload.exp * 1000) - Date.now() - 5 * 60_000;
+  const msUntilRefresh = (payload.exp * 1000) - Date.now() - 2 * 60_000;
+
+  if (msUntilWarning > 0 && onExpiringSoon) {
+    setTimeout(() => onExpiringSoon(), msUntilWarning);
+  }
+
+  _refreshTimer = setTimeout(() => {
+    silentRefresh(clientId).then(() => {
+      onRefreshed(getUser());
+      scheduleTokenRefresh(clientId, { onRefreshed, onExpired, onExpiringSoon });
+    }).catch(() => {
+      onExpired();
+    });
+  }, Math.max(msUntilRefresh, 0));
+}
+
+// Attempt silent re-auth via Google One Tap with auto_select
+function silentRefresh(clientId) {
+  return new Promise((resolve, reject) => {
+    google.accounts.id.initialize({
+      client_id: clientId,
+      callback: (response) => {
+        if (!response.credential) {
+          reject(new Error('Silent refresh failed'));
+          return;
+        }
+        const payload = decodeJwtPayload(response.credential);
+        if (!payload) {
+          reject(new Error('Invalid token from refresh'));
+          return;
+        }
+        _credential = response.credential;
+        _user = { email: payload.email, name: payload.name };
+        persistSession();
+        resolve();
+      },
+      auto_select: true,
+    });
+    google.accounts.id.prompt((notification) => {
+      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+        reject(new Error('Silent refresh suppressed'));
+      }
+    });
+  });
 }

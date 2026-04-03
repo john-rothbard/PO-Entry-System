@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, isConfigured, loadConfig, saveConfig as persistConfig, exportConfigFile, importConfigFile } from './api';
-import { initGoogleAuth, signIn, signOut, isSignedIn, getUser } from './auth';
+import { initGoogleAuth, signIn, signOut, isSignedIn, getUser, tryRestoreSession, scheduleTokenRefresh } from './auth';
 import { DEFAULT_CONFIG } from './config';
 import { globalCSS, Icons, Badge, Button, Card, Toast } from './components';
 import AdminPanel from './AdminPanel';
@@ -17,6 +17,8 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [toast, setToast] = useState(null);
   const [recentOrders, setRecentOrders] = useState([]);
+  const [theme, setTheme] = useState(() => localStorage.getItem('po_theme') || 'dark');
+  const [sessionWarning, setSessionWarning] = useState(false);
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type });
@@ -25,10 +27,38 @@ export default function App() {
   // Persist config on change
   useEffect(() => { persistConfig(config); }, [config]);
 
-  // Initialize Google auth on mount
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('po_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => t === 'dark' ? 'light' : 'dark');
+
+  const startRefreshSchedule = () => {
+    scheduleTokenRefresh(CLIENT_ID, {
+      onExpiringSoon: () => setSessionWarning(true),
+      onRefreshed: (u) => { setUser(u); setSessionWarning(false); },
+      onExpired: () => {
+        setSessionWarning(false);
+        showToast('Session expired. Please sign in again.', 'warning');
+        signOut();
+        setSignedIn(false);
+        setUser(null);
+      },
+    });
+  };
+
+  // Initialize Google auth on mount + restore session
   useEffect(() => {
     if (!configured) return;
-    initGoogleAuth(CLIENT_ID).catch(() => {});
+    initGoogleAuth(CLIENT_ID).then(() => {
+      if (tryRestoreSession()) {
+        setSignedIn(true);
+        setUser(getUser());
+        startRefreshSchedule();
+      }
+    }).catch(() => {});
   }, [configured]);
 
   const handleSignIn = async () => {
@@ -37,6 +67,8 @@ export default function App() {
       await signIn(CLIENT_ID);
       setSignedIn(true);
       setUser(getUser());
+      setSessionWarning(false);
+      startRefreshSchedule();
     } catch (err) {
       if (err.message === 'SHOW_BUTTON') {
         // One-tap was suppressed — show a message to use the button
@@ -129,8 +161,14 @@ export default function App() {
   // ── Sign-in screen ────────────────────────────────────────
   if (!signedIn) {
     return (
-      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
         <style>{globalCSS}</style>
+        <div style={{ position: "absolute", top: 16, right: 16 }}>
+          <Button variant="ghost" size="sm" onClick={toggleTheme}
+            icon={theme === 'dark' ? <Icons.sun size={16} /> : <Icons.moon size={16} />}>
+            {theme === 'dark' ? 'Light' : 'Dark'}
+          </Button>
+        </div>
         <Card style={{ maxWidth: 400, width: "100%", margin: 24, textAlign: "center" }}>
           <div style={{
             width: 56, height: 56, borderRadius: "var(--radius)", background: "var(--accent)",
@@ -177,6 +215,10 @@ export default function App() {
           <Badge variant="success">Connected</Badge>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Button variant="ghost" size="sm" onClick={toggleTheme}
+            icon={theme === 'dark' ? <Icons.sun size={16} /> : <Icons.moon size={16} />}>
+            {theme === 'dark' ? 'Light' : 'Dark'}
+          </Button>
           <Button variant="ghost" size="sm" onClick={handleTestConnection} icon={<Icons.server size={16} />}>
             Test Connection
           </Button>
@@ -188,6 +230,17 @@ export default function App() {
           <Button variant="ghost" size="sm" onClick={handleSignOut}>Sign out</Button>
         </div>
       </header>
+
+      {sessionWarning && (
+        <div style={{
+          padding: "10px 24px", background: "var(--warning-bg)", borderBottom: "1px solid var(--warning)",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          fontSize: 13, fontWeight: 500, color: "var(--warning)",
+        }}>
+          <Icons.alert size={14} color="var(--warning)" />
+          Session expiring soon — refreshing automatically. If sign-in appears, please re-authenticate.
+        </div>
+      )}
 
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
         {recentOrders.length > 0 && (

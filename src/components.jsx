@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 export const globalCSS = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  :root {
+  :root, [data-theme="dark"] {
     --bg: #0F1117; --bg-card: #181B24; --bg-input: #1E2230; --bg-hover: #252938;
     --border: #2A2E3B; --border-focus: #4F7CFF;
     --text: #E8EAF0; --text-secondary: #8B90A0; --text-muted: #5C6070;
@@ -16,6 +16,16 @@ export const globalCSS = `
     --shadow: 0 4px 24px rgba(0,0,0,0.3);
     --font: 'DM Sans', -apple-system, sans-serif;
     --mono: 'JetBrains Mono', monospace;
+  }
+  [data-theme="light"] {
+    --bg: #F5F0E8; --bg-card: #FFFDF7; --bg-input: #EDE8DC; --bg-hover: #E8E2D0;
+    --border: #D6CFBD; --border-focus: #39E75F;
+    --text: #1A1A2E; --text-secondary: #6B5F8A; --text-muted: #9B93B0;
+    --accent: #39E75F; --accent-hover: #2ED650; --accent-subtle: rgba(57,231,95,0.12);
+    --success: #22C55E; --success-bg: rgba(34,197,94,0.12);
+    --warning: #D97706; --warning-bg: rgba(217,119,6,0.12);
+    --danger: #DC2626; --danger-bg: rgba(220,38,38,0.1);
+    --shadow: 0 4px 24px rgba(107,95,138,0.1);
   }
   body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.5; }
   @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -77,6 +87,12 @@ export const Icons = {
       <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
     </svg>
   ),
+  sun: (p) => (
+    <svg width={p?.size||18} height={p?.size||18} viewBox="0 0 24 24" fill="none" stroke={p?.color||"currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+    </svg>
+  ),
+  moon: (p) => <SvgIcon d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" {...p} />,
 };
 
 // ── UI Components ───────────────────────────────────────────
