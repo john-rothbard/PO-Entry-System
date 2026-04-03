@@ -33,42 +33,38 @@ function decodeJwtPayload(token) {
   }
 }
 
-export async function initGoogleAuth(clientId) {
+// Initialize GSI once with a credential callback.
+// onCredential is called whenever Google returns a token (button click or auto-select).
+let _onCredential = null;
+
+export async function initGoogleAuth(clientId, onCredential) {
+  _onCredential = onCredential || null;
   await waitForGoogle();
   google.accounts.id.initialize({
     client_id: clientId,
-    callback: () => {}, // overridden per sign-in call
+    callback: (response) => {
+      if (!response.credential) return;
+      const payload = decodeJwtPayload(response.credential);
+      if (!payload) return;
+      _credential = response.credential;
+      _user = { email: payload.email, name: payload.name };
+      persistSession();
+      if (_onCredential) _onCredential({ credential: _credential, email: _user.email, name: _user.name });
+    },
     auto_select: false,
   });
 }
 
-export function signIn(clientId) {
-  return new Promise((resolve, reject) => {
-    google.accounts.id.initialize({
-      client_id: clientId,
-      callback: (response) => {
-        if (!response.credential) {
-          reject(new Error('Sign-in cancelled or failed'));
-          return;
-        }
-        const payload = decodeJwtPayload(response.credential);
-        if (!payload) {
-          reject(new Error('Invalid token received'));
-          return;
-        }
-        _credential = response.credential;
-        _user = { email: payload.email, name: payload.name };
-        persistSession();
-        resolve({ credential: _credential, ..._user });
-      },
-      auto_select: false,
-    });
-    google.accounts.id.prompt((notification) => {
-      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        // Prompt was suppressed — fall back to rendering a button via a temp div
-        reject(new Error('SHOW_BUTTON'));
-      }
-    });
+// Render Google's official sign-in button into a container element.
+// This bypasses FedCM/One Tap issues — always works.
+export function renderSignInButton(container) {
+  if (!window.google || !container) return;
+  google.accounts.id.renderButton(container, {
+    type: 'standard',
+    theme: 'outline',
+    size: 'large',
+    text: 'signin_with',
+    width: 350,
   });
 }
 
@@ -154,9 +150,12 @@ export function scheduleTokenRefresh(clientId, { onRefreshed, onExpired, onExpir
   }, Math.max(msUntilRefresh, 0));
 }
 
-// Attempt silent re-auth via Google One Tap with auto_select
+// Attempt silent re-auth via Google One Tap with auto_select.
+// Best-effort — if FedCM blocks it, the onExpired callback handles sign-out.
 function silentRefresh(clientId) {
   return new Promise((resolve, reject) => {
+    // Temporarily re-initialize with auto_select to try silent refresh
+    const savedCallback = _onCredential;
     google.accounts.id.initialize({
       client_id: clientId,
       callback: (response) => {
@@ -172,12 +171,15 @@ function silentRefresh(clientId) {
         _credential = response.credential;
         _user = { email: payload.email, name: payload.name };
         persistSession();
+        // Restore the original callback for the rendered button
+        _onCredential = savedCallback;
         resolve();
       },
       auto_select: true,
     });
     google.accounts.id.prompt((notification) => {
       if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+        _onCredential = savedCallback;
         reject(new Error('Silent refresh suppressed'));
       }
     });

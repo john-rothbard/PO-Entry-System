@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, isConfigured, loadConfig, saveConfig as persistConfig, exportConfigFile, importConfigFile } from './api';
-import { initGoogleAuth, signIn, signOut, isSignedIn, getUser, tryRestoreSession, scheduleTokenRefresh } from './auth';
+import { initGoogleAuth, renderSignInButton, signOut, isSignedIn, getUser, tryRestoreSession, scheduleTokenRefresh } from './auth';
 import { DEFAULT_CONFIG } from './config';
 import { globalCSS, Icons, Badge, Button, Card, Toast } from './components';
 import AdminPanel from './AdminPanel';
@@ -13,7 +13,8 @@ export default function App() {
   const configured = isConfigured();
   const [signedIn, setSignedIn] = useState(false);
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(false);
+  const [gsiReady, setGsiReady] = useState(false);
+  const googleBtnRef = useRef(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [toast, setToast] = useState(null);
   const [recentOrders, setRecentOrders] = useState([]);
@@ -52,7 +53,14 @@ export default function App() {
   // Initialize Google auth on mount + restore session
   useEffect(() => {
     if (!configured) return;
-    initGoogleAuth(CLIENT_ID).then(() => {
+    initGoogleAuth(CLIENT_ID, () => {
+      // Called when Google returns a credential (button click)
+      setSignedIn(true);
+      setUser(getUser());
+      setSessionWarning(false);
+      startRefreshSchedule();
+    }).then(() => {
+      setGsiReady(true);
       if (tryRestoreSession()) {
         setSignedIn(true);
         setUser(getUser());
@@ -61,25 +69,12 @@ export default function App() {
     }).catch(() => {});
   }, [configured]);
 
-  const handleSignIn = async () => {
-    setAuthLoading(true);
-    try {
-      await signIn(CLIENT_ID);
-      setSignedIn(true);
-      setUser(getUser());
-      setSessionWarning(false);
-      startRefreshSchedule();
-    } catch (err) {
-      if (err.message === 'SHOW_BUTTON') {
-        // One-tap was suppressed — show a message to use the button
-        showToast('Click the Google Sign-In button to continue.', 'warning');
-      } else {
-        showToast('Sign-in failed: ' + err.message, 'error');
-      }
-    } finally {
-      setAuthLoading(false);
+  // Render Google's sign-in button when GSI is ready and we're on the sign-in screen
+  useEffect(() => {
+    if (gsiReady && !signedIn && googleBtnRef.current) {
+      renderSignInButton(googleBtnRef.current);
     }
-  };
+  }, [gsiReady, signedIn]);
 
   const handleSignOut = () => {
     signOut();
@@ -179,15 +174,12 @@ export default function App() {
           <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 28 }}>
             Sign in with your <strong>@honeydewsleep.com</strong> account to continue.
           </p>
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={handleSignIn}
-            disabled={authLoading}
-            style={{ width: "100%", justifyContent: "center" }}
-          >
-            {authLoading ? 'Signing in...' : 'Sign in with Google'}
-          </Button>
+          <div style={{ display: "flex", justifyContent: "center", minHeight: 44 }}>
+            {gsiReady
+              ? <div ref={googleBtnRef}></div>
+              : <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Loading sign-in...</span>
+            }
+          </div>
         </Card>
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       </div>

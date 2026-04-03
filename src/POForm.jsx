@@ -48,6 +48,7 @@ export default function POForm({ config, onSubmit }) {
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [addingProduct, setAddingProduct] = useState(false);
   const [newItem, setNewItem] = useState({ sku: "", quantity: "", unitPrice: "" });
 
@@ -109,7 +110,21 @@ export default function POForm({ config, onSubmit }) {
     return Object.keys(errs).length === 0;
   };
 
+  const getMissingFields = () => {
+    const missing = [];
+    if (!form.retailerId) missing.push("Retailer");
+    if (!form.poNumber.trim()) missing.push("PO Number");
+    if (!form.shipTo.name.trim()) missing.push("Name");
+    if (!form.shipTo.address1.trim()) missing.push("Address");
+    if (!form.shipTo.city.trim()) missing.push("City");
+    if (!form.shipTo.state) missing.push("State");
+    if (!form.shipTo.zip.trim()) missing.push("Zip");
+    if (form.lineItems.length === 0) missing.push("a Product");
+    return missing;
+  };
+
   const handleSubmit = async () => {
+    setSubmitAttempted(true);
     if (!validate()) return;
     setSubmitting(true);
     const billTo = form.billToSameAsShip ? form.shipTo : form.billTo;
@@ -146,6 +161,7 @@ export default function POForm({ config, onSubmit }) {
     try {
       await onSubmit(payload, retailer);
       setForm(emptyForm);
+      setSubmitAttempted(false);
     } catch (err) { /* handled in parent */ }
     finally { setSubmitting(false); }
   };
@@ -340,6 +356,13 @@ export default function POForm({ config, onSubmit }) {
             style={{ width: "100%", justifyContent: "center", marginTop: 20 }}>
             {submitting ? "Submitting..." : "Submit Order to ShipStation"}
           </Button>
+          {submitAttempted && getMissingFields().length > 0 && (
+            <p style={{
+              marginTop: 12, fontSize: 13, color: "var(--danger)", textAlign: "center", lineHeight: 1.5,
+            }}>
+              Need {getMissingFields().join(", ")} to submit!
+            </p>
+          )}
         </Card>
 
         {form.lineItems.length > 0 && (
