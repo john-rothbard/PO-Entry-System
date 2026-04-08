@@ -266,7 +266,10 @@ export default function POForm({ config, onSubmit }) {
                 <Select label="Product" value={newItem.sku}
                   onChange={(e) => setNewItem({ ...newItem, sku: e.target.value })}
                   placeholder="Select product..."
-                  options={availableProducts.map((p) => ({ value: p.sku, label: `${p.retailerName} → ${p.sku}` }))} />
+                  options={availableProducts.map((p) => {
+                    const name = p.retailerName.length > 40 ? p.retailerName.slice(0, 40) + '...' : p.retailerName;
+                    return { value: p.sku, label: `${name} → ${p.sku}` };
+                  })} />
                 <Input label="Quantity" type="number" min="1" value={newItem.quantity}
                   onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })} placeholder="Qty" />
                 <Input label="Unit Price ($)" type="number" step="0.01" min="0" value={newItem.unitPrice}

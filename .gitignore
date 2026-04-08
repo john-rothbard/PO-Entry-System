@@ -2,3 +2,6 @@ node_modules/
 dist/
 .env
 .DS_Store
+po-config.json
+SKUS and names.xlsx
+Honeydew_SKU_Alias_Map.xlsx
