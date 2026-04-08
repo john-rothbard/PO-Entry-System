@@ -130,7 +130,9 @@ export default function POForm({ config, onSubmit }) {
     const billTo = form.billToSameAsShip ? form.shipTo : form.billTo;
     const payload = {
       orderNumber: form.poNumber,
-      orderDate: new Date(form.orderDate).toISOString(),
+      orderDate: form.orderDate === new Date().toISOString().split("T")[0]
+        ? new Date().toISOString()
+        : new Date(form.orderDate + "T12:00:00").toISOString(),
       paymentDate: new Date().toISOString(),
       orderStatus: "awaiting_shipment",
       customerEmail: form.shipTo.email || undefined,
@@ -153,8 +155,6 @@ export default function POForm({ config, onSubmit }) {
       taxAmount: Number(form.taxPaid) || 0,
       advancedOptions: {
         storeId: retailer?.shipStationStoreId,
-        customField1: retailer?.name,
-        customField2: form.poNumber,
       },
       internalNotes: form.notes || undefined,
     };
@@ -178,7 +178,7 @@ export default function POForm({ config, onSubmit }) {
               placeholder="Select retailer..." options={config.retailers.map((r) => ({ value: r.id, label: r.name }))} />
             <Input label="PO Number" required value={form.poNumber} error={errors.poNumber}
               onChange={(e) => updateField("poNumber", e.target.value)} placeholder="Enter PO #" />
-            <Input label="Order Date" type="date" value={form.orderDate}
+            <Input label="Age" type="date" value={form.orderDate}
               onChange={(e) => updateField("orderDate", e.target.value)} />
           </div>
           {retailer && (
