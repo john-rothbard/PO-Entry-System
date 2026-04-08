@@ -47,6 +47,7 @@ export const api = {
   createOrder: (payload) => gasRequest('create_order', payload),
   getStores: () => gasRequest('get_stores'),
   testConnection: () => gasRequest('test_connection'),
+  sendToAsana: (payload) => gasRequest('create_asana_task', payload),
 };
 
 export function isConfigured() {
