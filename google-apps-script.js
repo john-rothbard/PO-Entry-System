@@ -1,7 +1,7 @@
 // ============================================================
 // PO ENTRY SYSTEM — Google Apps Script
 // ============================================================
-// This script acts as a secure middleware between your local
+// This script acts as a secure middleware between the hosted
 // PO form and ShipStation's API.
 //
 // SETUP:
@@ -23,7 +23,7 @@ var CONFIG = {
   SHIPSTATION_API_SECRET: 'YOUR_SHIPSTATION_API_SECRET',
 
   // Your Google OAuth Client ID (same one used in the React app)
-  GOOGLE_CLIENT_ID: '555633268289-1qgl84b08oehm88dm3q2ijlhqo508d3f.apps.googleusercontent.com',
+  GOOGLE_CLIENT_ID: 'GOOGLE_CLIENT_ID',
 
   // Only allow sign-ins from this Google Workspace domain
   ALLOWED_DOMAIN: 'honeydewsleep.com',
@@ -31,12 +31,19 @@ var CONFIG = {
   // Google Sheet ID — get this from the sheet URL:
   // https://docs.google.com/spreadsheets/d/THIS_PART/edit
   // Required because getActiveSpreadsheet() doesn't work in web app context
-  SPREADSHEET_ID: '1CcxXIzp0bcqf0Rki9aJZah_skgf0addCdN6O-JF4iYk',
+  SPREADSHEET_ID: 'SPREADSHEET_ID',
 
   // Allowed origins — add your GitHub Pages URL here after deploying
   // Leave empty to allow all origins (fine for local dev, lock down for production)
   // Example: ['https://john-rothbard.github.io', 'http://localhost:3000']
   ALLOWED_ORIGINS: [],
+
+  // Asana integration — create tasks from submitted POs
+  // Generate a PAT at: https://app.asana.com/0/developer-console
+  ASANA_PAT: 'YOUR_ASANA_PAT',
+  // Find GIDs in the Asana URL or via the API
+  ASANA_PROJECT_GID: 'ASANA_GID',
+  ASANA_SECTION_GID: 'ASANA_SECT_GID', // "test section" — will become dynamic per-retailer later
 };
 
 // ── CORS + Security Headers ─────────────────────────────────
@@ -97,6 +104,8 @@ function doPost(e) {
         return handleGetStores_();
       case 'test_connection':
         return handleTestConnection_();
+      case 'create_asana_task':
+        return handleCreateAsanaTask_(body.payload, authResult.email);
       default:
         return createCorsResponse({ error: 'Unknown action: ' + action }, 400);
     }
@@ -234,6 +243,117 @@ function handleTestConnection_() {
     });
   } catch (err) {
     return createCorsResponse({ error: 'Connection failed: ' + err.message }, 502);
+  }
+}
+
+// ============================================================
+// ASANA API
+// ============================================================
+
+function asanaRequest_(endpoint, method, payload) {
+  var url = 'https://app.asana.com/api/1.0' + endpoint;
+  var options = {
+    method: method || 'get',
+    headers: {
+      'Authorization': 'Bearer ' + CONFIG.ASANA_PAT,
+      'Content-Type': 'application/json',
+    },
+    muteHttpExceptions: true,
+  };
+
+  if (payload) {
+    options.payload = JSON.stringify(payload);
+  }
+
+  var response = UrlFetchApp.fetch(url, options);
+  var code = response.getResponseCode();
+  var text = response.getContentText();
+
+  var data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    data = { raw: text };
+  }
+
+  if (code < 200 || code >= 300) {
+    var errMsg = (data.errors && data.errors[0] && data.errors[0].message) || 'Asana error: ' + code;
+    throw new Error(errMsg);
+  }
+
+  return data;
+}
+
+function handleCreateAsanaTask_(payload, userEmail) {
+  if (!payload || !payload.orderNumber) {
+    return createCorsResponse({ error: 'Missing order data' }, 400);
+  }
+
+  if (CONFIG.ASANA_PAT === 'YOUR_ASANA_PAT') {
+    return createCorsResponse({ error: 'Asana is not configured. Set ASANA_PAT in Apps Script.' }, 500);
+  }
+
+  try {
+    var ship = payload.shipTo || {};
+    var bill = payload.billTo || {};
+    var items = payload.items || [];
+
+    var itemLines = items.map(function(item) {
+      return '  • ' + item.sku + '  ×' + item.quantity + '  @$' + Number(item.unitPrice).toFixed(2);
+    }).join('\n');
+
+    var itemsTotal = items.reduce(function(sum, item) {
+      return sum + (item.quantity * item.unitPrice);
+    }, 0);
+    var orderTotal = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
+
+    var notes = 'PO #' + payload.orderNumber + '\n'
+      + 'Retailer: ' + (payload.retailer || '') + '\n'
+      + 'Order Date: ' + (payload.orderDate || '') + '\n'
+      + 'Submitted by: ' + (userEmail || '') + '\n'
+      + (payload.shipStationOrderId ? 'ShipStation ID: ' + payload.shipStationOrderId + '\n' : '')
+      + '\n'
+      + '── Ship To ──\n'
+      + (ship.name || '') + '\n'
+      + (ship.street1 || '') + (ship.street2 ? '\n' + ship.street2 : '') + '\n'
+      + (ship.city || '') + ', ' + (ship.state || '') + ' ' + (ship.postalCode || '') + '\n'
+      + '\n'
+      + '── Bill To ──\n'
+      + (bill.name || '') + '\n'
+      + (bill.street1 || '') + (bill.street2 ? '\n' + bill.street2 : '') + '\n'
+      + (bill.city || '') + ', ' + (bill.state || '') + ' ' + (bill.postalCode || '') + '\n'
+      + '\n'
+      + '── Line Items ──\n'
+      + itemLines + '\n'
+      + '\n'
+      + 'Shipping: $' + Number(payload.shippingAmount || 0).toFixed(2) + '\n'
+      + 'Tax: $' + Number(payload.taxAmount || 0).toFixed(2) + '\n'
+      + 'Total: $' + orderTotal.toFixed(2);
+
+    var taskData = {
+      data: {
+        name: 'PO #' + payload.orderNumber + ' — ' + (payload.retailer || 'Unknown'),
+        notes: notes,
+        projects: [CONFIG.ASANA_PROJECT_GID],
+        memberships: [{ project: CONFIG.ASANA_PROJECT_GID, section: CONFIG.ASANA_SECTION_GID }],
+      }
+    };
+
+    if (payload.orderDate) {
+      taskData.data.due_on = payload.orderDate;
+    }
+
+    var result = asanaRequest_('/tasks', 'post', taskData);
+
+    return createCorsResponse({
+      success: true,
+      taskId: result.data.gid,
+      taskUrl: 'https://app.asana.com/0/' + CONFIG.ASANA_PROJECT_GID + '/' + result.data.gid,
+      message: 'Task created in Asana',
+    });
+
+  } catch (err) {
+    return createCorsResponse({ error: 'Asana: ' + err.message }, 502);
   }
 }
 
