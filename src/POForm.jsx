@@ -51,6 +51,7 @@ export default function POForm({ config, onSubmit }) {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [addingProduct, setAddingProduct] = useState(false);
   const [newItem, setNewItem] = useState({ sku: "", quantity: "", unitPrice: "" });
+  const [itemErrors, setItemErrors] = useState({ sku: false, quantity: false, unitPrice: false });
 
   const retailer = config.retailers.find((r) => r.id === form.retailerId);
   const retailerAliases = config.retailerAliases[form.retailerId] || {};
@@ -77,7 +78,15 @@ export default function POForm({ config, onSubmit }) {
   };
 
   const addLineItem = () => {
-    if (!newItem.sku || !newItem.quantity || !newItem.unitPrice) return;
+    const errs = {
+      sku: !newItem.sku,
+      quantity: !newItem.quantity,
+      unitPrice: !newItem.unitPrice || Number(newItem.unitPrice) <= 0,
+    };
+    if (errs.sku || errs.quantity || errs.unitPrice) {
+      setItemErrors(errs);
+      return;
+    }
     const master = config.masterSkus.find((s) => s.sku === newItem.sku);
     const item = {
       sku: newItem.sku, name: master?.name || newItem.sku,
@@ -86,6 +95,7 @@ export default function POForm({ config, onSubmit }) {
     };
     setForm((f) => ({ ...f, lineItems: [...f.lineItems, item] }));
     setNewItem({ sku: "", quantity: "", unitPrice: "" });
+    setItemErrors({ sku: false, quantity: false, unitPrice: false });
     setAddingProduct(false);
   };
 
@@ -264,20 +274,23 @@ export default function POForm({ config, onSubmit }) {
             <div style={{ padding: 14, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px dashed var(--border-focus)" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 120px", gap: 10, marginBottom: 10 }}>
                 <Select label="Product" value={newItem.sku}
-                  onChange={(e) => setNewItem({ ...newItem, sku: e.target.value })}
+                  error={itemErrors.sku}
+                  onChange={(e) => { setNewItem({ ...newItem, sku: e.target.value }); setItemErrors((er) => ({ ...er, sku: false })); }}
                   placeholder="Select product..."
                   options={availableProducts.map((p) => {
                     const name = p.retailerName.length > 40 ? p.retailerName.slice(0, 40) + '...' : p.retailerName;
                     return { value: p.sku, label: `${name} → ${p.sku}` };
                   })} />
                 <Input label="Quantity" type="number" min="1" value={newItem.quantity}
-                  onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })} placeholder="Qty" />
-                <Input label="Unit Price ($)" type="number" step="0.01" min="0" value={newItem.unitPrice}
-                  onChange={(e) => setNewItem({ ...newItem, unitPrice: e.target.value })} placeholder="0.00" />
+                  error={itemErrors.quantity}
+                  onChange={(e) => { setNewItem({ ...newItem, quantity: e.target.value }); setItemErrors((er) => ({ ...er, quantity: false })); }} placeholder="Qty" />
+                <Input label="Unit Price ($)" type="number" step="0.01" min="0.01" value={newItem.unitPrice}
+                  error={itemErrors.unitPrice}
+                  onChange={(e) => { setNewItem({ ...newItem, unitPrice: e.target.value }); setItemErrors((er) => ({ ...er, unitPrice: false })); }} placeholder="0.00" />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <Button size="sm" onClick={addLineItem} icon={<Icons.plus size={14} />}>Add Product</Button>
-                <Button variant="ghost" size="sm" onClick={() => { setAddingProduct(false); setNewItem({ sku: "", quantity: "", unitPrice: "" }); }}>Cancel</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setAddingProduct(false); setNewItem({ sku: "", quantity: "", unitPrice: "" }); setItemErrors({ sku: false, quantity: false, unitPrice: false }); }}>Cancel</Button>
               </div>
             </div>
           ) : (
