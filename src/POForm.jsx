@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Icons, Badge, Input, Select, Button, Card, Divider } from './components';
 import { US_STATES } from './config';
+import { openPackingList } from './packingList';
 
 function AddressFields({ prefix, data, errors, updateField }) {
   return (
@@ -131,6 +132,21 @@ export default function POForm({ config, onSubmit }) {
     if (!form.shipTo.zip.trim()) missing.push("Zip");
     if (form.lineItems.length === 0) missing.push("a Product");
     return missing;
+  };
+
+  const handleDownloadPackingList = () => {
+    if (!form.poNumber.trim() || form.lineItems.length === 0) {
+      setSubmitAttempted(true);
+      validate();
+      return;
+    }
+    openPackingList({
+      poNumber: form.poNumber,
+      orderDate: form.orderDate,
+      lineItems: form.lineItems,
+      shipTo: form.shipTo,
+      notes: form.notes,
+    });
   };
 
   const handleSubmit = async () => {
@@ -371,6 +387,11 @@ export default function POForm({ config, onSubmit }) {
             icon={submitting ? null : <Icons.send size={16} />}
             style={{ width: "100%", justifyContent: "center", marginTop: 20 }}>
             {submitting ? "Submitting..." : "Submit Order to ShipStation"}
+          </Button>
+          <Button variant="secondary" size="md" onClick={handleDownloadPackingList}
+            icon={<Icons.download size={16} />}
+            style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
+            Download Packing List
           </Button>
           {submitAttempted && getMissingFields().length > 0 && (
             <p style={{
