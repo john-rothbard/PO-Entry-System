@@ -389,7 +389,6 @@ export default function POForm({ config, onSubmit }) {
             {submitting ? "Submitting..." : "Submit Order to ShipStation"}
           </Button>
           <Button variant="secondary" size="md" onClick={handleDownloadPackingList}
-            icon={<Icons.download size={16} />}
             style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
             Download Packing List
           </Button>

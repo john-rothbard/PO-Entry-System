@@ -220,4 +220,5 @@ export function openPackingList({ poNumber, orderDate, lineItems, shipTo, notes 
   win.document.open();
   win.document.write(html);
   win.document.close();
+  win.onload = () => win.print();
 }
