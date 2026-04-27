@@ -1,4 +1,12 @@
+import pdfMake from 'pdfmake/build/pdfmake';
+import pdfFonts from 'pdfmake/build/vfs_fonts';
 import logoUrl from './assets/packing-list-logo.jpeg';
+
+pdfMake.addVirtualFileSystem(pdfFonts);
+
+const ROW_COUNT = 15;
+const BLUE = '#CFD8E8';
+const YELLOW = '#FFFF00';
 
 const formatDate = (isoDate) => {
   if (!isoDate) return '';
@@ -6,219 +14,238 @@ const formatDate = (isoDate) => {
   return `${Number(m)}/${Number(d)}/${y}`;
 };
 
-const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
+let cachedLogoDataUrl = null;
+async function getLogoDataUrl() {
+  if (cachedLogoDataUrl) return cachedLogoDataUrl;
+  const res = await fetch(logoUrl);
+  const blob = await res.blob();
+  cachedLogoDataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+  return cachedLogoDataUrl;
+}
 
-const ROW_COUNT = 15;
+function buildCustomerStack(shipTo) {
+  const name = shipTo?.company?.trim() || shipTo?.name?.trim() || '';
+  if (!name) return { text: '', width: '*' };
+  const cityLine = [shipTo?.city, shipTo?.state].filter(Boolean).join(', ')
+    + (shipTo?.zip ? ` ${shipTo.zip}` : '');
+  const contact = [shipTo?.phone, shipTo?.email].filter(Boolean).join(' | ');
+  const lines = [{ text: name, bold: true }];
+  if (shipTo?.address1) lines.push({ text: shipTo.address1 });
+  if (shipTo?.address2) lines.push({ text: shipTo.address2 });
+  if (cityLine.trim()) lines.push({ text: cityLine });
+  if (contact) lines.push({ text: contact, margin: [0, 6, 0, 0] });
+  return { stack: lines, width: '*' };
+}
 
-export function buildPackingListHtml({ poNumber, orderDate, lineItems, shipTo, notes, logoDataUrl }) {
+function thinBlackLayout() {
+  return {
+    hLineWidth: () => 0.7,
+    vLineWidth: () => 0.7,
+    hLineColor: () => '#000',
+    vLineColor: () => '#000',
+    paddingTop: () => 3,
+    paddingBottom: () => 3,
+    paddingLeft: () => 5,
+    paddingRight: () => 5,
+  };
+}
+
+function colHeader(text) {
+  return { text, fillColor: BLUE, bold: true, alignment: 'center', fontSize: 10 };
+}
+
+function fillCell(text) {
+  return { text, fillColor: YELLOW, alignment: 'center' };
+}
+
+export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo, notes, logoDataUrl }) {
   const totalOrdered = lineItems.reduce((a, b) => a + Number(b.quantity || 0), 0);
   const shipDate = orderDate;
 
-  const customerName = shipTo?.company?.trim() || shipTo?.name?.trim() || '';
-  const customerCityLine = [shipTo?.city, shipTo?.state].filter(Boolean).join(', ')
-    + (shipTo?.zip ? ` ${shipTo.zip}` : '');
-  const customerContact = [shipTo?.phone, shipTo?.email].filter(Boolean).join(' | ');
-  const customerBlock = customerName ? `
-        <div class="addr">
-          <div class="company">${escapeHtml(customerName)}</div>
-          ${shipTo?.address1 ? `<div>${escapeHtml(shipTo.address1)}</div>` : ''}
-          ${shipTo?.address2 ? `<div>${escapeHtml(shipTo.address2)}</div>` : ''}
-          ${customerCityLine.trim() ? `<div>${escapeHtml(customerCityLine)}</div>` : ''}
-          ${customerContact ? `<div class="contact">${escapeHtml(customerContact)}</div>` : ''}
-        </div>` : '';
-
-  const rows = [];
+  const itemRows = [];
   for (let i = 0; i < ROW_COUNT; i++) {
     const item = lineItems[i];
     if (item) {
       const productNumber = (item.retailerName && item.retailerName !== item.name)
         ? item.retailerName
         : item.sku;
-      rows.push(`
-        <tr>
-          <td class="c">${i + 1}</td>
-          <td class="c">${item.quantity}</td>
-          <td class="c">${item.quantity}</td>
-          <td class="c">${escapeHtml(item.name)}</td>
-          <td class="c">${escapeHtml(productNumber)}</td>
-        </tr>`);
+      itemRows.push([
+        { text: String(i + 1), alignment: 'center' },
+        { text: String(item.quantity), alignment: 'center' },
+        { text: String(item.quantity), alignment: 'center' },
+        { text: item.name, alignment: 'center' },
+        { text: productNumber, alignment: 'center' },
+      ]);
     } else {
-      rows.push(`
-        <tr>
-          <td>&nbsp;</td><td></td><td></td><td></td><td></td>
-        </tr>`);
+      itemRows.push([
+        { text: ' ' }, { text: '' }, { text: '' }, { text: '' }, { text: '' },
+      ]);
     }
   }
 
-  return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Packing List ${escapeHtml(poNumber)}</title>
-<style>
-  @page { size: letter; margin: 0.5in 1in 0.5in 0.5in; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; font-family: Arial, sans-serif; color: #000; background: #fff; }
-  body, body * { font-family: Arial, sans-serif; }
-  body { padding: 24px 96px 24px 32px; font-size: 11px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
-  .header h1 { font-size: 36px; font-weight: 400; margin: 0 0 14px 0; letter-spacing: -0.5px; }
-  .header .addresses { display: flex; gap: 48px; }
-  .header .addr { font-size: 11px; line-height: 1.45; }
-  .header .addr .company { font-weight: 700; margin-bottom: 2px; }
-  .header .contact { margin-top: 8px; font-size: 11px; }
-  .header img { width: 110px; height: 110px; object-fit: contain; }
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  .meta-table { margin-bottom: 14px; }
-  .meta-table th, .meta-table td { border: 1px solid #000; height: 22px; }
-  .meta-table th { background: #CFD8E8; font-size: 11px; font-weight: 700; text-align: center; }
-  .meta-table td { text-align: center; font-size: 12px; padding: 2px 6px; }
-  .meta-table td.fill { background: #FFFF00; }
-  .meta-table td.blank { background: #fff; }
-  .items-table th, .items-table td { border: 1px solid #000; font-size: 11px; }
-  .items-table th { background: #CFD8E8; font-weight: 700; text-align: center; padding: 6px 4px; }
-  .items-table td { height: 22px; padding: 3px 6px; }
-  .items-table td.c { text-align: center; }
-  .totals-table { margin-top: 0; border-top: none; }
-  .totals-table th, .totals-table td { border: 1px solid #000; font-size: 11px; }
-  .totals-table th { background: #CFD8E8; font-weight: 700; text-align: center; padding: 6px 4px; }
-  .totals-table td { height: 22px; text-align: center; padding: 3px 6px; }
-  .notes-table { margin-top: 14px; }
-  .notes-table th { background: #CFD8E8; font-weight: 700; text-align: center; padding: 6px; font-size: 11px; border: 1px solid #000; }
-  .notes-table td { border: 1px solid #000; min-height: 22px; padding: 6px 8px; font-size: 11px; white-space: pre-wrap; }
-  .received { margin-top: 26px; }
-  .received .label { font-weight: 700; font-size: 11px; margin-bottom: 18px; }
-  .received .lines { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 20px; }
-  .received .lines .field { background: #FFFF00; border-bottom: 1px solid #000; height: 18px; }
-  .received .lines .caption { font-size: 10px; margin-top: 3px; }
-  @media print {
-    body { padding: 0; }
-    .no-print { display: none !important; }
-  }
-  .toolbar {
-    position: fixed; top: 12px; right: 12px; background: #fff;
-    border: 1px solid #888; border-radius: 6px; padding: 8px 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-size: 12px;
-  }
-  .toolbar button {
-    background: #2563eb; color: #fff; border: none; padding: 6px 12px;
-    border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600;
-  }
-</style>
-</head>
-<body>
-  <div class="no-print toolbar">
-    <button onclick="window.print()">Print / Save as PDF</button>
-  </div>
+  return {
+    pageSize: 'LETTER',
+    pageMargins: [36, 30, 36, 30],
+    defaultStyle: { fontSize: 10, lineHeight: 1.15 },
+    images: { logo: logoDataUrl },
+    content: [
+      {
+        columns: [
+          {
+            width: '*',
+            stack: [
+              { text: 'Packing List', fontSize: 28, margin: [0, 0, 0, 12] },
+              {
+                columns: [
+                  {
+                    width: '*',
+                    stack: [
+                      { text: 'Honeydew Sleep', bold: true },
+                      { text: '4670 Calle Carga Ste. A,' },
+                      { text: 'Camarillo, CA 93012' },
+                      { text: '(805) 657-5768 | jonathan@honeydewsleep.com', margin: [0, 6, 0, 0] },
+                    ],
+                  },
+                  buildCustomerStack(shipTo),
+                ],
+                columnGap: 24,
+              },
+            ],
+          },
+          {
+            width: 110,
+            image: 'logo',
+            fit: [110, 110],
+          },
+        ],
+      },
 
-  <div class="header">
-    <div>
-      <h1>Packing List</h1>
-      <div class="addresses">
-        <div class="addr">
-          <div class="company">Honeydew Sleep</div>
-          <div>4670 Calle Carga Ste. A,</div>
-          <div>Camarillo, CA 93012</div>
-          <div class="contact">(805) 657-5768 | jonathan@honeydewsleep.com</div>
-        </div>
-        ${customerBlock}
-      </div>
-    </div>
-    <img src="${logoDataUrl}" alt="Honeydew Sleep">
-  </div>
+      {
+        margin: [0, 14, 0, 0],
+        table: {
+          widths: [86, 86, '*', 142],
+          body: [
+            [colHeader('Order Date'), colHeader('Ship Date'), colHeader(''), colHeader('Customer PO Number')],
+            [
+              fillCell(formatDate(orderDate)),
+              fillCell(formatDate(shipDate)),
+              { text: '' },
+              fillCell(poNumber || ''),
+            ],
+          ],
+        },
+        layout: thinBlackLayout(),
+      },
 
-  <table class="meta-table">
-    <colgroup>
-      <col style="width:16%"><col style="width:16%"><col style="width:42%"><col style="width:26%">
-    </colgroup>
-    <tr>
-      <th>Order Date</th>
-      <th>Ship Date</th>
-      <th></th>
-      <th>Customer PO Number</th>
-    </tr>
-    <tr>
-      <td class="fill">${escapeHtml(formatDate(orderDate))}</td>
-      <td class="fill">${escapeHtml(formatDate(shipDate))}</td>
-      <td class="blank"></td>
-      <td class="fill">${escapeHtml(poNumber)}</td>
-    </tr>
-  </table>
+      {
+        margin: [0, 14, 0, 0],
+        table: {
+          headerRows: 1,
+          widths: [54, 65, 65, '*', 130],
+          body: [
+            [
+              colHeader('Line Item'),
+              colHeader('Quantity\nOrdered'),
+              colHeader('Quantity\nShipped'),
+              colHeader('Description'),
+              colHeader('Product Number'),
+            ],
+            ...itemRows,
+          ],
+        },
+        layout: thinBlackLayout(),
+      },
 
-  <table class="items-table">
-    <colgroup>
-      <col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:42%"><col style="width:24%">
-    </colgroup>
-    <thead>
-      <tr>
-        <th>Line Item</th>
-        <th>Quantity<br>Ordered</th>
-        <th>Quantity<br>Shipped</th>
-        <th>Description</th>
-        <th>Product Number</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rows.join('')}
-    </tbody>
-  </table>
+      {
+        table: {
+          widths: [86, 86, 97, '*'],
+          body: [
+            [
+              colHeader('Total Ordered'),
+              colHeader('Total Shipped'),
+              colHeader('Total\nBackordered'),
+              { text: 'Shipment Notes:', fillColor: BLUE, bold: true, alignment: 'left' },
+            ],
+            [
+              { text: String(totalOrdered), alignment: 'center' },
+              { text: String(totalOrdered), alignment: 'center' },
+              { text: '0', alignment: 'center' },
+              { text: '' },
+            ],
+          ],
+        },
+        layout: thinBlackLayout(),
+      },
 
-  <table class="totals-table">
-    <colgroup>
-      <col style="width:16%"><col style="width:16%"><col style="width:18%"><col style="width:50%">
-    </colgroup>
-    <tr>
-      <th>Total Ordered</th>
-      <th>Total Shipped</th>
-      <th>Total<br>Backordered</th>
-      <th style="text-align:left; padding-left:8px;">Shipment Notes:</th>
-    </tr>
-    <tr>
-      <td>${totalOrdered}</td>
-      <td>${totalOrdered}</td>
-      <td>0</td>
-      <td></td>
-    </tr>
-  </table>
+      {
+        margin: [0, 14, 0, 0],
+        table: {
+          widths: ['*'],
+          body: [
+            [colHeader('Additional Notes')],
+            [{ text: notes || '', alignment: 'left', margin: [2, 4, 2, 4] }],
+          ],
+        },
+        layout: thinBlackLayout(),
+      },
 
-  <table class="notes-table">
-    <tr><th>Additional Notes</th></tr>
-    <tr><td>${escapeHtml(notes || '')}</td></tr>
-  </table>
-
-  <div class="received">
-    <div class="label">RECEIVED BY:</div>
-    <div class="lines">
-      <div>
-        <div class="field"></div>
-        <div class="caption">PRINT NAME</div>
-      </div>
-      <div>
-        <div class="field"></div>
-        <div class="caption">SIGN NAME</div>
-      </div>
-      <div>
-        <div class="field"></div>
-        <div class="caption">DATE</div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
+      {
+        margin: [0, 24, 0, 0],
+        stack: [
+          { text: 'RECEIVED BY:', bold: true, margin: [0, 0, 0, 18] },
+          {
+            columns: [
+              {
+                width: '*',
+                stack: [
+                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 150, h: 16, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
+                  { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 150, y2: 0, lineWidth: 0.7 }], margin: [0, 0, 0, 2] },
+                  { text: 'PRINT NAME', fontSize: 8 },
+                ],
+              },
+              {
+                width: '*',
+                stack: [
+                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 200, h: 16, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
+                  { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 200, y2: 0, lineWidth: 0.7 }], margin: [0, 0, 0, 2] },
+                  { text: 'SIGN NAME', fontSize: 8 },
+                ],
+              },
+              {
+                width: '*',
+                stack: [
+                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 120, h: 16, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
+                  { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 0.7 }], margin: [0, 0, 0, 2] },
+                  { text: 'DATE', fontSize: 8 },
+                ],
+              },
+            ],
+            columnGap: 20,
+          },
+        ],
+      },
+    ],
+  };
 }
 
-export function openPackingList({ poNumber, orderDate, lineItems, shipTo, notes }) {
-  const html = buildPackingListHtml({ poNumber, orderDate, lineItems, shipTo, notes, logoDataUrl: logoUrl });
-  const win = window.open('', '_blank');
-  if (!win) {
-    alert('Please allow pop-ups to generate the packing list.');
-    return;
-  }
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
-  win.onload = () => win.print();
+async function buildPdfDoc(input) {
+  const logoDataUrl = await getLogoDataUrl();
+  const docDef = buildPackingListDocDef({ ...input, logoDataUrl });
+  return pdfMake.createPdf(docDef);
+}
+
+export async function downloadPackingListPdf(input) {
+  const pdf = await buildPdfDoc(input);
+  const filename = `Packing-List-${input.poNumber || 'PO'}.pdf`;
+  pdf.download(filename);
+}
+
+export async function getPackingListPdfBase64(input) {
+  const pdf = await buildPdfDoc(input);
+  return await pdf.getBase64();
 }

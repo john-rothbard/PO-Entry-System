@@ -4,7 +4,7 @@ import { Icons, Badge, Input, Button, Divider } from './components';
 export default function AdminPanel({ config, setConfig, onClose, onFetchStores, onFetchProducts }) {
   const [tab, setTab] = useState("retailers");
   const [editingAlias, setEditingAlias] = useState(null);
-  const [newRetailer, setNewRetailer] = useState({ name: "", shipStationStoreId: "", salesChannel: "" });
+  const [newRetailer, setNewRetailer] = useState({ name: "", shipStationStoreId: "", salesChannel: "", asanaSectionGid: "" });
   const [newSku, setNewSku] = useState({ sku: "", name: "", category: "" });
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -16,7 +16,14 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
       retailers: [...c.retailers, { id, ...newRetailer, shipStationStoreId: Number(newRetailer.shipStationStoreId) }],
       retailerAliases: { ...c.retailerAliases, [id]: {} },
     }));
-    setNewRetailer({ name: "", shipStationStoreId: "", salesChannel: "" });
+    setNewRetailer({ name: "", shipStationStoreId: "", salesChannel: "", asanaSectionGid: "" });
+  };
+
+  const updateRetailer = (id, patch) => {
+    setConfig((c) => ({
+      ...c,
+      retailers: c.retailers.map((r) => r.id === id ? { ...r, ...patch } : r),
+    }));
   };
 
   const removeRetailer = (id) => {
@@ -126,7 +133,7 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
           {tab === "retailers" && (
             <div>
               <div style={{
-                display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, marginBottom: 16,
+                display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, marginBottom: 16,
                 padding: 16, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--border)",
               }}>
                 <Input placeholder="Retailer Name" value={newRetailer.name}
@@ -135,18 +142,31 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
                   onChange={(e) => setNewRetailer({ ...newRetailer, shipStationStoreId: e.target.value })} />
                 <Input placeholder="Sales Channel Name" value={newRetailer.salesChannel}
                   onChange={(e) => setNewRetailer({ ...newRetailer, salesChannel: e.target.value })} />
+                <Input placeholder="Asana Section GID" value={newRetailer.asanaSectionGid}
+                  onChange={(e) => setNewRetailer({ ...newRetailer, asanaSectionGid: e.target.value })} />
                 <Button onClick={addRetailer} icon={<Icons.plus size={16} />} size="sm">Add</Button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {config.retailers.map((r) => (
                   <div key={r.id} style={{
-                    display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto",
+                    display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto",
                     gap: 12, padding: "10px 14px", alignItems: "center",
                     borderRadius: "var(--radius)", background: "var(--bg)", border: "1px solid var(--border)",
                   }}>
                     <span style={{ fontWeight: 500 }}>{r.name}</span>
                     <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--text-secondary)" }}>Store #{r.shipStationStoreId}</span>
                     <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>{r.salesChannel}</span>
+                    <input
+                      placeholder="Asana Section GID"
+                      value={r.asanaSectionGid || ""}
+                      onChange={(e) => updateRetailer(r.id, { asanaSectionGid: e.target.value })}
+                      style={{
+                        padding: "6px 10px", background: "var(--bg-input)",
+                        border: `1px solid ${r.asanaSectionGid ? "var(--success)" : "var(--border)"}`,
+                        borderRadius: "var(--radius)", color: "var(--text)", fontSize: 13,
+                        fontFamily: "var(--mono)", outline: "none",
+                      }}
+                    />
                     <Button variant="danger" size="sm" onClick={() => removeRetailer(r.id)} icon={<Icons.trash size={14} />} />
                   </div>
                 ))}

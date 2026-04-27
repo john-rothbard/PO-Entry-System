@@ -105,6 +105,19 @@ export default function App() {
     }
   };
 
+  const handleSendPackingListToAsana = async (payload) => {
+    try {
+      const result = await api.sendPackingListToAsana(payload);
+      showToast(`Packing list sent to Asana for PO ${payload.orderNumber}`);
+      if (result.taskUrl) {
+        console.log('Asana task:', result.taskUrl);
+      }
+    } catch (err) {
+      showToast(`Asana error: ${err.message}`, "error");
+      throw err;
+    }
+  };
+
   const handleFetchStores = async () => {
     try {
       const data = await api.getStores();
@@ -264,7 +277,11 @@ export default function App() {
           </Card>
         )}
 
-        <POForm config={config} onSubmit={handleSubmitOrder} />
+        <POForm
+          config={config}
+          onSubmit={handleSubmitOrder}
+          onSendPackingListToAsana={handleSendPackingListToAsana}
+        />
       </main>
 
       {showAdmin && (

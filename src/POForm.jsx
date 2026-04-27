@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Icons, Badge, Input, Select, Button, Card, Divider } from './components';
 import { US_STATES } from './config';
-import { openPackingList } from './packingList';
+import { downloadPackingListPdf, getPackingListPdfBase64 } from './packingList';
 
 function AddressFields({ prefix, data, errors, updateField }) {
   return (
@@ -35,7 +35,7 @@ function AddressFields({ prefix, data, errors, updateField }) {
   );
 }
 
-export default function POForm({ config, onSubmit }) {
+export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
   const emptyForm = {
     retailerId: "", poNumber: "",
     orderDate: new Date().toISOString().split("T")[0],
@@ -50,6 +50,7 @@ export default function POForm({ config, onSubmit }) {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [sendingToAsana, setSendingToAsana] = useState(false);
   const [addingProduct, setAddingProduct] = useState(false);
   const [newItem, setNewItem] = useState({ sku: "", quantity: "", unitPrice: "" });
   const [itemErrors, setItemErrors] = useState({ sku: false, quantity: false, unitPrice: false });
@@ -134,19 +135,49 @@ export default function POForm({ config, onSubmit }) {
     return missing;
   };
 
-  const handleDownloadPackingList = () => {
+  const packingListInput = () => ({
+    poNumber: form.poNumber,
+    orderDate: form.orderDate,
+    lineItems: form.lineItems,
+    shipTo: form.shipTo,
+    notes: form.notes,
+  });
+
+  const handleDownloadPackingList = async () => {
     if (!form.poNumber.trim() || form.lineItems.length === 0) {
       setSubmitAttempted(true);
       validate();
       return;
     }
-    openPackingList({
-      poNumber: form.poNumber,
-      orderDate: form.orderDate,
-      lineItems: form.lineItems,
-      shipTo: form.shipTo,
-      notes: form.notes,
-    });
+    await downloadPackingListPdf(packingListInput());
+  };
+
+  const handleSendPackingListToAsana = async () => {
+    setSubmitAttempted(true);
+    if (!validate()) return;
+    setSendingToAsana(true);
+    try {
+      const pdfBase64 = await getPackingListPdfBase64(packingListInput());
+      await onSendPackingListToAsana({
+        orderNumber: form.poNumber,
+        orderDate: form.orderDate,
+        retailer: retailer?.name,
+        retailerId: form.retailerId,
+        asanaSectionGid: retailer?.asanaSectionGid,
+        shipTo: {
+          name: form.shipTo.name, company: form.shipTo.company || undefined,
+          street1: form.shipTo.address1, street2: form.shipTo.address2 || undefined,
+          city: form.shipTo.city, state: form.shipTo.state, postalCode: form.shipTo.zip,
+        },
+        items: form.lineItems.map((item) => ({
+          sku: item.sku, name: item.name, quantity: item.quantity, unitPrice: item.unitPrice,
+        })),
+        notes: form.notes || undefined,
+        pdfBase64,
+        pdfFilename: `Packing-List-${form.poNumber}.pdf`,
+      });
+    } catch (err) { /* handled in parent */ }
+    finally { setSendingToAsana(false); }
   };
 
   const handleSubmit = async () => {
@@ -391,6 +422,11 @@ export default function POForm({ config, onSubmit }) {
           <Button variant="secondary" size="md" onClick={handleDownloadPackingList}
             style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
             Download Packing List
+          </Button>
+          <Button variant="secondary" size="md" onClick={handleSendPackingListToAsana}
+            disabled={sendingToAsana}
+            style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
+            {sendingToAsana ? "Sending..." : "Send PL to Asana"}
           </Button>
           {submitAttempted && getMissingFields().length > 0 && (
             <p style={{

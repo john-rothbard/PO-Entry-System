@@ -106,6 +106,8 @@ function doPost(e) {
         return handleTestConnection_();
       case 'create_asana_task':
         return handleCreateAsanaTask_(body.payload, authResult.email);
+      case 'create_asana_task_with_attachment':
+        return handleCreateAsanaTaskWithAttachment_(body.payload, authResult.email);
       default:
         return createCorsResponse({ error: 'Unknown action: ' + action }, 400);
     }
@@ -357,6 +359,73 @@ function handleCreateAsanaTask_(payload, userEmail) {
   }
 }
 
+function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
+  if (!payload || !payload.orderNumber) {
+    return createCorsResponse({ error: 'Missing order data' }, 400);
+  }
+  if (!payload.pdfBase64) {
+    return createCorsResponse({ error: 'Missing PDF data' }, 400);
+  }
+  if (CONFIG.ASANA_PAT === 'YOUR_ASANA_PAT') {
+    return createCorsResponse({ error: 'Asana is not configured. Set ASANA_PAT in Apps Script.' }, 500);
+  }
+  if (!payload.asanaSectionGid) {
+    return createCorsResponse({
+      error: 'No Asana section configured for retailer "' + (payload.retailer || 'Unknown')
+        + '". Open Config → Retailers and set its Asana Section GID.'
+    }, 400);
+  }
+
+  try {
+    var taskData = {
+      data: {
+        name: 'PO #' + payload.orderNumber,
+        projects: [CONFIG.ASANA_PROJECT_GID],
+        memberships: [{ project: CONFIG.ASANA_PROJECT_GID, section: payload.asanaSectionGid }],
+      }
+    };
+    if (payload.orderDate) {
+      taskData.data.due_on = payload.orderDate;
+    }
+
+    var taskResult = asanaRequest_('/tasks', 'post', taskData);
+    var taskGid = taskResult.data.gid;
+
+    var filename = payload.pdfFilename || ('Packing-List-' + payload.orderNumber + '.pdf');
+    var pdfBlob = Utilities.newBlob(Utilities.base64Decode(payload.pdfBase64), 'application/pdf', filename);
+
+    var attachOptions = {
+      method: 'post',
+      headers: { 'Authorization': 'Bearer ' + CONFIG.ASANA_PAT },
+      payload: { file: pdfBlob },
+      muteHttpExceptions: true,
+    };
+    var attachResponse = UrlFetchApp.fetch(
+      'https://app.asana.com/api/1.0/tasks/' + taskGid + '/attachments',
+      attachOptions
+    );
+    var attachCode = attachResponse.getResponseCode();
+    if (attachCode < 200 || attachCode >= 300) {
+      var attachText = attachResponse.getContentText();
+      var attachData;
+      try { attachData = JSON.parse(attachText); } catch (e) { attachData = { raw: attachText }; }
+      var errMsg = (attachData.errors && attachData.errors[0] && attachData.errors[0].message)
+        || 'Asana attachment error: ' + attachCode;
+      throw new Error(errMsg);
+    }
+
+    return createCorsResponse({
+      success: true,
+      taskId: taskGid,
+      taskUrl: 'https://app.asana.com/0/' + CONFIG.ASANA_PROJECT_GID + '/' + taskGid,
+      message: 'Task with packing list created in Asana',
+    });
+
+  } catch (err) {
+    return createCorsResponse({ error: 'Asana: ' + err.message }, 502);
+  }
+}
+
 // ============================================================
 // GOOGLE SHEET LOGGING
 // ============================================================
@@ -479,6 +548,36 @@ function isRateLimited_() {
   
   cache.put(key, String(current + 1), 60); // Expires in 60 seconds
   return false;
+}
+
+// ============================================================
+// UTILITY: List Asana sections for the configured project
+// ============================================================
+// Run this once from the Apps Script editor (select the function,
+// click Run, then View > Logs). It logs every section name + GID
+// in your CONFIG.ASANA_PROJECT_GID project so you can paste the
+// GIDs into each retailer in the AdminPanel.
+
+function listAsanaSections() {
+  if (!CONFIG.ASANA_PAT || CONFIG.ASANA_PAT === 'YOUR_ASANA_PAT') {
+    Logger.log('ERROR: ASANA_PAT not configured.');
+    return;
+  }
+  if (!CONFIG.ASANA_PROJECT_GID || CONFIG.ASANA_PROJECT_GID === 'ASANA_GID') {
+    Logger.log('ERROR: ASANA_PROJECT_GID not configured.');
+    return;
+  }
+  try {
+    var result = asanaRequest_('/projects/' + CONFIG.ASANA_PROJECT_GID + '/sections', 'get');
+    var sections = result.data || [];
+    Logger.log('Found ' + sections.length + ' section(s) in project ' + CONFIG.ASANA_PROJECT_GID + ':');
+    Logger.log('');
+    sections.forEach(function(s) {
+      Logger.log('  ' + s.gid + '  →  ' + s.name);
+    });
+  } catch (err) {
+    Logger.log('ERROR: ' + err.message);
+  }
 }
 
 // ============================================================
