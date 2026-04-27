@@ -48,15 +48,15 @@ function thinBlackLayout() {
     vLineWidth: () => 0.7,
     hLineColor: () => '#000',
     vLineColor: () => '#000',
-    paddingTop: () => 3,
-    paddingBottom: () => 3,
+    paddingTop: () => 1.5,
+    paddingBottom: () => 1.5,
     paddingLeft: () => 5,
     paddingRight: () => 5,
   };
 }
 
 function colHeader(text) {
-  return { text, fillColor: BLUE, bold: true, alignment: 'center', fontSize: 10 };
+  return { text, fillColor: BLUE, bold: true, alignment: 'center', fontSize: 9 };
 }
 
 function fillCell(text) {
@@ -90,8 +90,8 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
 
   return {
     pageSize: 'LETTER',
-    pageMargins: [36, 30, 36, 30],
-    defaultStyle: { fontSize: 10, lineHeight: 1.15 },
+    pageMargins: [36, 22, 36, 22],
+    defaultStyle: { fontSize: 9, lineHeight: 1.1 },
     images: { logo: logoDataUrl },
     content: [
       {
@@ -99,7 +99,7 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
           {
             width: '*',
             stack: [
-              { text: 'Packing List', fontSize: 28, margin: [0, 0, 0, 12] },
+              { text: 'Packing List', fontSize: 24, margin: [0, 0, 0, 8] },
               {
                 columns: [
                   {
@@ -126,7 +126,7 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
       },
 
       {
-        margin: [0, 14, 0, 0],
+        margin: [0, 8, 0, 0],
         table: {
           widths: [86, 86, '*', 142],
           body: [
@@ -143,7 +143,7 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
       },
 
       {
-        margin: [0, 14, 0, 0],
+        margin: [0, 8, 0, 0],
         table: {
           headerRows: 1,
           widths: [54, 65, 65, '*', 130],
@@ -183,7 +183,7 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
       },
 
       {
-        margin: [0, 14, 0, 0],
+        margin: [0, 8, 0, 0],
         table: {
           widths: ['*'],
           body: [
@@ -195,15 +195,15 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
       },
 
       {
-        margin: [0, 24, 0, 0],
+        margin: [0, 14, 0, 0],
         stack: [
-          { text: 'RECEIVED BY:', bold: true, margin: [0, 0, 0, 18] },
+          { text: 'RECEIVED BY:', bold: true, margin: [0, 0, 0, 10] },
           {
             columns: [
               {
                 width: '*',
                 stack: [
-                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 150, h: 16, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
+                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 150, h: 14, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
                   { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 150, y2: 0, lineWidth: 0.7 }], margin: [0, 0, 0, 2] },
                   { text: 'PRINT NAME', fontSize: 8 },
                 ],
@@ -211,7 +211,7 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
               {
                 width: '*',
                 stack: [
-                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 200, h: 16, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
+                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 200, h: 14, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
                   { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 200, y2: 0, lineWidth: 0.7 }], margin: [0, 0, 0, 2] },
                   { text: 'SIGN NAME', fontSize: 8 },
                 ],
@@ -219,7 +219,7 @@ export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo,
               {
                 width: '*',
                 stack: [
-                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 120, h: 16, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
+                  { canvas: [{ type: 'rect', x: 0, y: 0, w: 120, h: 14, color: YELLOW, lineColor: '#000', lineWidth: 0 }] },
                   { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 0.7 }], margin: [0, 0, 0, 2] },
                   { text: 'DATE', fontSize: 8 },
                 ],

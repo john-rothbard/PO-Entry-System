@@ -414,6 +414,30 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
       throw new Error(errMsg);
     }
 
+    if (payload.attachmentBase64) {
+      var extraName = payload.attachmentFilename || 'attachment';
+      var extraBlob = Utilities.newBlob(Utilities.base64Decode(payload.attachmentBase64), null, extraName);
+      var extraOptions = {
+        method: 'post',
+        headers: { 'Authorization': 'Bearer ' + CONFIG.ASANA_PAT },
+        payload: { file: extraBlob },
+        muteHttpExceptions: true,
+      };
+      var extraResponse = UrlFetchApp.fetch(
+        'https://app.asana.com/api/1.0/tasks/' + taskGid + '/attachments',
+        extraOptions
+      );
+      var extraCode = extraResponse.getResponseCode();
+      if (extraCode < 200 || extraCode >= 300) {
+        var extraText = extraResponse.getContentText();
+        var extraData;
+        try { extraData = JSON.parse(extraText); } catch (e) { extraData = { raw: extraText }; }
+        var extraErr = (extraData.errors && extraData.errors[0] && extraData.errors[0].message)
+          || 'Asana attachment error: ' + extraCode;
+        throw new Error('Extra attachment failed: ' + extraErr);
+      }
+    }
+
     return createCorsResponse({
       success: true,
       taskId: taskGid,

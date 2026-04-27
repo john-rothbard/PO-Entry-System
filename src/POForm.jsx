@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { Icons, Badge, Input, Select, Button, Card, Divider } from './components';
 import { US_STATES } from './config';
 import { downloadPackingListPdf, getPackingListPdfBase64 } from './packingList';
@@ -51,6 +51,9 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [sendingToAsana, setSendingToAsana] = useState(false);
+  const [attachedFile, setAttachedFile] = useState(null);
+  const [showAttachPrompt, setShowAttachPrompt] = useState(false);
+  const fileInputRef = useRef(null);
   const [addingProduct, setAddingProduct] = useState(false);
   const [newItem, setNewItem] = useState({ sku: "", quantity: "", unitPrice: "" });
   const [itemErrors, setItemErrors] = useState({ sku: false, quantity: false, unitPrice: false });
@@ -152,12 +155,39 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
     await downloadPackingListPdf(packingListInput());
   };
 
-  const handleSendPackingListToAsana = async () => {
-    setSubmitAttempted(true);
-    if (!validate()) return;
+  const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const openAttachPicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const onFileSelected = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      alert('File too large. Max 25 MB.');
+      e.target.value = '';
+      return;
+    }
+    setAttachedFile(file);
+    e.target.value = '';
+  };
+
+  const sendToAsanaCore = async () => {
     setSendingToAsana(true);
     try {
       const pdfBase64 = await getPackingListPdfBase64(packingListInput());
+      let attachmentBase64;
+      let attachmentFilename;
+      if (attachedFile) {
+        attachmentBase64 = await readFileAsBase64(attachedFile);
+        attachmentFilename = attachedFile.name;
+      }
       await onSendPackingListToAsana({
         orderNumber: form.poNumber,
         orderDate: form.orderDate,
@@ -175,9 +205,22 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
         notes: form.notes || undefined,
         pdfBase64,
         pdfFilename: `Packing-List-${form.poNumber}.pdf`,
+        attachmentBase64,
+        attachmentFilename,
       });
+      setAttachedFile(null);
     } catch (err) { /* handled in parent */ }
     finally { setSendingToAsana(false); }
+  };
+
+  const handleSendPackingListToAsana = async () => {
+    setSubmitAttempted(true);
+    if (!validate()) return;
+    if (!attachedFile) {
+      setShowAttachPrompt(true);
+      return;
+    }
+    await sendToAsanaCore();
   };
 
   const handleSubmit = async () => {
@@ -318,7 +361,8 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
           )}
 
           {addingProduct && form.retailerId ? (
-            <div style={{ padding: 14, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px dashed var(--border-focus)" }}>
+            <form onSubmit={(e) => { e.preventDefault(); addLineItem(); }}
+              style={{ padding: 14, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px dashed var(--border-focus)" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 120px", gap: 10, marginBottom: 10 }}>
                 <Select label="Product" value={newItem.sku}
                   error={itemErrors.sku}
@@ -336,10 +380,10 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
                   onChange={(e) => { setNewItem({ ...newItem, unitPrice: e.target.value }); setItemErrors((er) => ({ ...er, unitPrice: false })); }} placeholder="0.00" />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <Button size="sm" onClick={addLineItem} icon={<Icons.plus size={14} />}>Add Product</Button>
-                <Button variant="ghost" size="sm" onClick={() => { setAddingProduct(false); setNewItem({ sku: "", quantity: "", unitPrice: "" }); setItemErrors({ sku: false, quantity: false, unitPrice: false }); }}>Cancel</Button>
+                <Button type="submit" size="sm" icon={<Icons.plus size={14} />}>Add Product</Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => { setAddingProduct(false); setNewItem({ sku: "", quantity: "", unitPrice: "" }); setItemErrors({ sku: false, quantity: false, unitPrice: false }); }}>Cancel</Button>
               </div>
-            </div>
+            </form>
           ) : (
             <Button variant="secondary" size="sm" onClick={() => setAddingProduct(true)}
               disabled={!form.retailerId} icon={<Icons.plus size={16} />}>Add Product</Button>
@@ -419,15 +463,39 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
             style={{ width: "100%", justifyContent: "center", marginTop: 20 }}>
             {submitting ? "Submitting..." : "Submit Order to ShipStation"}
           </Button>
-          <Button variant="secondary" size="md" onClick={handleDownloadPackingList}
-            style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
-            Download Packing List
-          </Button>
           <Button variant="secondary" size="md" onClick={handleSendPackingListToAsana}
             disabled={sendingToAsana}
             style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
             {sendingToAsana ? "Sending..." : "Send PL to Asana"}
           </Button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+            <Button variant="secondary" size="sm" onClick={handleDownloadPackingList}
+              style={{ justifyContent: "center" }}>
+              Download PL
+            </Button>
+            <Button variant="secondary" size="sm" onClick={openAttachPicker}
+              style={{ justifyContent: "center" }}>
+              {attachedFile ? "Replace File" : "Attach File for Asana"}
+            </Button>
+          </div>
+          {attachedFile && (
+            <div style={{
+              marginTop: 8, fontSize: 12, color: "var(--text-secondary)",
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+              padding: "6px 10px", background: "var(--bg)", border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+            }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                Attached: {attachedFile.name} ({(attachedFile.size / 1024).toFixed(1)} KB)
+              </span>
+              <button onClick={() => setAttachedFile(null)} style={{
+                background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 0,
+              }}>
+                <Icons.x size={14} />
+              </button>
+            </div>
+          )}
+          <input ref={fileInputRef} type="file" onChange={onFileSelected} style={{ display: "none" }} />
           {submitAttempted && getMissingFields().length > 0 && (
             <p style={{
               marginTop: 12, fontSize: 13, color: "var(--danger)", textAlign: "center", lineHeight: 1.5,
@@ -436,6 +504,40 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
             </p>
           )}
         </Card>
+
+        {showAttachPrompt && (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}>
+            <div style={{
+              background: "var(--bg-card)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border)",
+              maxWidth: 420, width: "100%", padding: 24, boxShadow: "0 16px 64px rgba(0,0,0,0.5)",
+            }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>No file attached</h3>
+              <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 20 }}>
+                Most Asana entries include the original PO order from the retailer. You can attach one now, or send without it.
+              </p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <Button variant="ghost" size="sm" onClick={() => setShowAttachPrompt(false)}>
+                  Cancel
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => {
+                  setShowAttachPrompt(false);
+                  openAttachPicker();
+                }}>
+                  Attach File
+                </Button>
+                <Button variant="success" size="sm" onClick={async () => {
+                  setShowAttachPrompt(false);
+                  await sendToAsanaCore();
+                }}>
+                  Send Without
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {form.lineItems.length > 0 && (
           <Card style={{ marginTop: 12 }}>
