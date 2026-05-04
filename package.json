@@ -9,9 +9,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "test": "node tests/run-tests.mjs"
   },
   "dependencies": {
+    "bwip-js": "^4.10.1",
     "pdfmake": "^0.3.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

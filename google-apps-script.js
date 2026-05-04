@@ -451,6 +451,33 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
       }
     }
 
+    if (payload.orderLabels && payload.orderLabels.length) {
+      for (var i = 0; i < payload.orderLabels.length; i++) {
+        var lbl = payload.orderLabels[i];
+        if (!lbl || !lbl.base64) continue;
+        var lblName = lbl.filename || ('Order-Label-' + (i + 1) + '.pdf');
+        var lblBlob = Utilities.newBlob(Utilities.base64Decode(lbl.base64), 'application/pdf', lblName);
+        var lblResponse = UrlFetchApp.fetch(
+          'https://app.asana.com/api/1.0/tasks/' + taskGid + '/attachments',
+          {
+            method: 'post',
+            headers: { 'Authorization': 'Bearer ' + CONFIG.ASANA_PAT },
+            payload: { file: lblBlob },
+            muteHttpExceptions: true,
+          }
+        );
+        var lblCode = lblResponse.getResponseCode();
+        if (lblCode < 200 || lblCode >= 300) {
+          var lblText = lblResponse.getContentText();
+          var lblData;
+          try { lblData = JSON.parse(lblText); } catch (e) { lblData = { raw: lblText }; }
+          var lblErr = (lblData.errors && lblData.errors[0] && lblData.errors[0].message)
+            || 'Asana attachment error: ' + lblCode;
+          throw new Error('Order label "' + lblName + '" failed: ' + lblErr);
+        }
+      }
+    }
+
     logActivity_(payload, userEmail, {
       asanaSentAt: new Date(),
       asanaTaskGid: taskGid,

@@ -52,6 +52,20 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
     }));
   };
 
+  const updateSku = (sku, patch) => {
+    setConfig((c) => ({
+      ...c,
+      masterSkus: c.masterSkus.map((s) => {
+        if (s.sku !== sku) return s;
+        const next = { ...s, ...patch };
+        Object.keys(patch).forEach((k) => {
+          if (next[k] === '' || next[k] === null || next[k] === undefined) delete next[k];
+        });
+        return next;
+      }),
+    }));
+  };
+
   const setAlias = (retailerId, sku, alias) => {
     setConfig((c) => ({
       ...c,
@@ -177,7 +191,7 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
           {tab === "skus" && (
             <div>
               <div style={{
-                display: "grid", gridTemplateColumns: "150px 1fr 150px auto", gap: 8, marginBottom: 16,
+                display: "grid", gridTemplateColumns: "140px 1fr 130px auto", gap: 8, marginBottom: 16,
                 padding: 16, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--border)",
               }}>
                 <Input placeholder="SKU Code" value={newSku.sku} onChange={(e) => setNewSku({ ...newSku, sku: e.target.value })} />
@@ -195,16 +209,45 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
                   }}
                 />
               </div>
+              <div style={{
+                display: "grid", gridTemplateColumns: "140px 1fr 110px 130px 70px auto",
+                gap: 12, padding: "0 14px 6px", fontSize: 11, fontWeight: 600,
+                color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em",
+              }}>
+                <span>SKU</span><span>Name</span><span>Category</span><span>UPC</span><span>Case</span><span></span>
+              </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {filteredSkus.map((s) => (
                   <div key={s.sku} style={{
-                    display: "grid", gridTemplateColumns: "150px 1fr 150px auto",
+                    display: "grid", gridTemplateColumns: "140px 1fr 110px 130px 70px auto",
                     gap: 12, padding: "10px 14px", alignItems: "center",
                     borderRadius: "var(--radius)", background: "var(--bg)", border: "1px solid var(--border)",
                   }}>
                     <span style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>{s.sku}</span>
-                    <span style={{ fontWeight: 500 }}>{s.name}</span>
+                    <span style={{ fontWeight: 500, fontSize: 13 }}>{s.name}</span>
                     <Badge>{s.category}</Badge>
+                    <input
+                      placeholder="12-digit UPC"
+                      value={s.upc || ""}
+                      onChange={(e) => updateSku(s.sku, { upc: e.target.value.replace(/\D/g, '').slice(0, 12) })}
+                      style={{
+                        padding: "6px 10px", background: "var(--bg-input)",
+                        border: `1px solid ${s.upc ? "var(--success)" : "var(--border)"}`,
+                        borderRadius: "var(--radius)", color: "var(--text)", fontSize: 12,
+                        fontFamily: "var(--mono)", outline: "none",
+                      }}
+                    />
+                    <input
+                      type="number" min="1" placeholder="auto"
+                      value={s.caseSize || ""}
+                      onChange={(e) => updateSku(s.sku, { caseSize: e.target.value ? Number(e.target.value) : '' })}
+                      style={{
+                        padding: "6px 10px", background: "var(--bg-input)",
+                        border: `1px solid ${s.caseSize ? "var(--success)" : "var(--border)"}`,
+                        borderRadius: "var(--radius)", color: "var(--text)", fontSize: 12,
+                        fontFamily: "var(--mono)", outline: "none", width: "100%",
+                      }}
+                    />
                     <Button variant="danger" size="sm" onClick={() => removeSku(s.sku)} icon={<Icons.trash size={14} />} />
                   </div>
                 ))}

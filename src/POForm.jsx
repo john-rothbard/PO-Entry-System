@@ -2,6 +2,7 @@ import { useState, useMemo, useRef } from 'react';
 import { Icons, Badge, Input, Select, Button, Card, Divider } from './components';
 import { US_STATES } from './config';
 import { downloadPackingListPdf, getPackingListPdfBase64 } from './packingList';
+import { downloadOrderLabelsPdf, getOrderLabelPdfsBase64, findMissingUpcs } from './orderLabel';
 
 function AddressFields({ prefix, data, errors, updateField }) {
   return (
@@ -44,6 +45,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
   const emptyForm = {
     retailerId: "", poNumber: "",
     orderDate: new Date().toISOString().split("T")[0],
+    deliverByDate: "",
     shipTo: { name: "", company: "", address1: "", address2: "", city: "", state: "", zip: "", phone: "", email: "" },
     billTo: { name: "", company: "", address1: "", address2: "", city: "", state: "", zip: "", phone: "", email: "" },
     billToSameAsShip: true,
@@ -59,6 +61,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
   const [downloadingPL, setDownloadingPL] = useState(false);
   const [attachedFile, setAttachedFile] = useState(null);
   const [showAttachPrompt, setShowAttachPrompt] = useState(false);
+  const [missingUpcs, setMissingUpcs] = useState(null);
   const fileInputRef = useRef(null);
   const [addingProduct, setAddingProduct] = useState(false);
   const [newItem, setNewItem] = useState({ sku: "", quantity: "", unitPrice: "" });
@@ -207,6 +210,32 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
     };
   };
 
+  const checkUpcsBeforeLabelGen = () => {
+    const missing = findMissingUpcs(form.lineItems, config.masterSkus);
+    if (missing.length > 0) {
+      setMissingUpcs(missing);
+      return false;
+    }
+    return true;
+  };
+
+  const orderLabelInput = () => ({
+    poNumber: form.poNumber,
+    deliverByDate: form.deliverByDate,
+    lineItems: form.lineItems,
+    masterSkus: config.masterSkus,
+  });
+
+  const handleDownloadOrderLabels = async () => {
+    if (!form.poNumber.trim() || form.lineItems.length === 0) {
+      setSubmitAttempted(true);
+      validate();
+      return;
+    }
+    if (!checkUpcsBeforeLabelGen()) return;
+    await downloadOrderLabelsPdf(orderLabelInput());
+  };
+
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result.split(',')[1]);
@@ -234,6 +263,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
     setSendingToAsana(true);
     try {
       const pdfBase64 = await getPackingListPdfBase64(packingListInput());
+      const orderLabels = await getOrderLabelPdfsBase64(orderLabelInput());
       let attachmentBase64;
       let attachmentFilename;
       if (attachedFile) {
@@ -242,11 +272,13 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
       }
       const result = await onSendPackingListToAsana({
         ...buildLogPayload(),
+        deliverByDate: form.deliverByDate || undefined,
         asanaSectionGid: retailer?.asanaSectionGid,
         pdfBase64,
         pdfFilename: `Packing-List-${form.poNumber}.pdf`,
         attachmentBase64,
         attachmentFilename,
+        orderLabels,
       });
       setSentToAsana({
         taskId: result?.taskId,
@@ -265,6 +297,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
     }
     setSubmitAttempted(true);
     if (!validate()) return;
+    if (!checkUpcsBeforeLabelGen()) return;
     if (!attachedFile) {
       setShowAttachPrompt(true);
       return;
@@ -345,7 +378,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <Card>
           <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Order Info</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Select label="Retailer" required value={form.retailerId} error={errors.retailerId}
               onChange={(e) => { updateField("retailerId", e.target.value); setForm((f) => ({ ...f, lineItems: [] })); }}
               placeholder="Select retailer..." options={config.retailers.map((r) => ({ value: r.id, label: r.name }))} />
@@ -356,6 +389,8 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
               }} placeholder="Enter PO #" />
             <Input label="Age" type="date" value={form.orderDate}
               onChange={(e) => updateField("orderDate", e.target.value)} />
+            <Input label="Deliver By" type="date" value={form.deliverByDate}
+              onChange={(e) => updateField("deliverByDate", e.target.value)} />
           </div>
           {retailer && (
             <div style={{
@@ -568,11 +603,15 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
               style={{ justifyContent: "center" }}>
               {downloadingPL ? "Downloading..." : "Download PL"}
             </Button>
-            <Button variant="secondary" size="sm" onClick={openAttachPicker}
+            <Button variant="secondary" size="sm" onClick={handleDownloadOrderLabels}
               style={{ justifyContent: "center" }}>
-              {attachedFile ? "Replace File" : "Attach File for Asana"}
+              Download Order Labels
             </Button>
           </div>
+          <Button variant="secondary" size="sm" onClick={openAttachPicker}
+            style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
+            {attachedFile ? "Replace File" : "Attach File for Asana"}
+          </Button>
           {attachedFile && (
             <div style={{
               marginTop: 8, fontSize: 12, color: "var(--text-secondary)",
@@ -603,6 +642,40 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
             </p>
           )}
         </Card>
+
+        {missingUpcs && (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}>
+            <div style={{
+              background: "var(--bg-card)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border)",
+              maxWidth: 480, width: "100%", padding: 24, boxShadow: "0 16px 64px rgba(0,0,0,0.5)",
+            }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Missing UPCs</h3>
+              <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 12 }}>
+                Cannot generate order labels — the following master SKUs have no UPC stored:
+              </p>
+              <ul style={{
+                margin: "0 0 16px", padding: "10px 14px", background: "var(--bg)",
+                border: "1px solid var(--border)", borderRadius: "var(--radius)",
+                listStyle: "none", fontFamily: "var(--mono)", fontSize: 13,
+              }}>
+                {missingUpcs.map((sku) => (
+                  <li key={sku} style={{ color: "var(--accent)", padding: "2px 0" }}>{sku}</li>
+                ))}
+              </ul>
+              <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 18 }}>
+                Add them in <strong>AdminPanel → Master SKUs</strong>, then try again.
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <Button variant="secondary" size="sm" onClick={() => setMissingUpcs(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showAttachPrompt && (
           <div style={{
