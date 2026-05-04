@@ -255,6 +255,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
       taxAmount: Number(form.taxPaid) || 0,
       advancedOptions: {
         storeId: retailer?.shipStationStoreId,
+        customField3: "sent via PO automation form",
       },
       internalNotes: form.notes || undefined,
     };
