@@ -90,13 +90,16 @@ export default function App() {
     try {
       const result = await api.createOrder(payload);
       setRecentOrders((prev) => [...prev, {
+        action: "shipstation",
         retailer: retailer?.name, poNumber: payload.orderNumber,
         status: "success", timestamp: new Date().toLocaleTimeString(),
         shipStationOrderId: result.orderId,
       }]);
       showToast(`Order ${payload.orderNumber} submitted! (ShipStation ID: ${result.orderId})`);
+      return result;
     } catch (err) {
       setRecentOrders((prev) => [...prev, {
+        action: "shipstation",
         retailer: retailer?.name, poNumber: payload.orderNumber,
         status: "error", timestamp: new Date().toLocaleTimeString(), error: err.message,
       }]);
@@ -108,13 +111,33 @@ export default function App() {
   const handleSendPackingListToAsana = async (payload) => {
     try {
       const result = await api.sendPackingListToAsana(payload);
+      setRecentOrders((prev) => [...prev, {
+        action: "asana",
+        retailer: payload.retailer, poNumber: payload.orderNumber,
+        status: "success", timestamp: new Date().toLocaleTimeString(),
+        asanaTaskId: result.taskId,
+      }]);
       showToast(`Packing list sent to Asana for PO ${payload.orderNumber}`);
       if (result.taskUrl) {
         console.log('Asana task:', result.taskUrl);
       }
+      return result;
     } catch (err) {
+      setRecentOrders((prev) => [...prev, {
+        action: "asana",
+        retailer: payload.retailer, poNumber: payload.orderNumber,
+        status: "error", timestamp: new Date().toLocaleTimeString(), error: err.message,
+      }]);
       showToast(`Asana error: ${err.message}`, "error");
       throw err;
+    }
+  };
+
+  const handleLogPackingList = async (payload) => {
+    try {
+      await api.logPackingList(payload);
+    } catch (err) {
+      console.warn('Packing list log failed:', err.message);
     }
   };
 
@@ -262,12 +285,17 @@ export default function App() {
                 }}>
                   <span style={{ display: "flex", gap: 12, alignItems: "center" }}>
                     <Badge variant={o.status === "success" ? "success" : "danger"}>
-                      {o.status === "success" ? "Sent" : "Error"}
+                      {o.status === "success"
+                        ? (o.action === "asana" ? "Asana" : "ShipStation")
+                        : "Error"}
                     </Badge>
                     <span style={{ fontWeight: 600 }}>{o.retailer}</span>
                     <span style={{ fontFamily: "var(--mono)", color: "var(--text-secondary)" }}>PO# {o.poNumber}</span>
                     {o.shipStationOrderId && (
                       <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-muted)" }}>SS#{o.shipStationOrderId}</span>
+                    )}
+                    {o.asanaTaskId && (
+                      <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-muted)" }}>Asana#{o.asanaTaskId}</span>
                     )}
                   </span>
                   <span style={{ color: "var(--text-muted)" }}>{o.timestamp}</span>
@@ -281,6 +309,7 @@ export default function App() {
           config={config}
           onSubmit={handleSubmitOrder}
           onSendPackingListToAsana={handleSendPackingListToAsana}
+          onLogPackingList={handleLogPackingList}
         />
       </main>
 

@@ -49,6 +49,7 @@ export const api = {
   testConnection: () => gasRequest('test_connection'),
   sendToAsana: (payload) => gasRequest('create_asana_task', payload),
   sendPackingListToAsana: (payload) => gasRequest('create_asana_task_with_attachment', payload),
+  logPackingList: (payload) => gasRequest('log_packing_list', payload),
 };
 
 export function isConfigured() {

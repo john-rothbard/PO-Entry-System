@@ -108,6 +108,8 @@ function doPost(e) {
         return handleCreateAsanaTask_(body.payload, authResult.email);
       case 'create_asana_task_with_attachment':
         return handleCreateAsanaTaskWithAttachment_(body.payload, authResult.email);
+      case 'log_packing_list':
+        return handleLogPackingList_(body.payload, authResult.email);
       default:
         return createCorsResponse({ error: 'Unknown action: ' + action }, 400);
     }
@@ -208,6 +210,11 @@ function handleCreateOrder_(payload, userEmail) {
   try {
     var result = shipStationRequest_('/orders/createorder', 'post', payload);
     logOrder_(payload, result, 'SUCCESS', userEmail);
+    logActivity_(payload, userEmail, {
+      ssSubmittedAt: new Date(),
+      ssOrderId: result.orderId,
+      ssOrderKey: result.orderKey,
+    });
 
     return createCorsResponse({
       success: true,
@@ -438,6 +445,11 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
       }
     }
 
+    logActivity_(payload, userEmail, {
+      asanaSentAt: new Date(),
+      asanaTaskGid: taskGid,
+    });
+
     return createCorsResponse({
       success: true,
       taskId: taskGid,
@@ -447,6 +459,19 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
 
   } catch (err) {
     return createCorsResponse({ error: 'Asana: ' + err.message }, 502);
+  }
+}
+
+// ── Log Packing List Download ──────────────────────────────
+function handleLogPackingList_(payload, userEmail) {
+  if (!payload || !payload.orderNumber) {
+    return createCorsResponse({ error: 'Missing order data' }, 400);
+  }
+  try {
+    logActivity_(payload, userEmail, { plDownloadedAt: new Date() });
+    return createCorsResponse({ success: true });
+  } catch (err) {
+    return createCorsResponse({ error: err.message }, 500);
   }
 }
 
@@ -524,6 +549,95 @@ function logOrder_(payload, result, status, userEmail) {
 
   } catch (err) {
     Logger.log('Failed to log order: ' + err.message);
+  }
+}
+
+// ── Order Activity (sessionId-keyed upsert) ────────────────
+// One row per "session" (form fill). PL download / SS submit / Asana send
+// each fill in their own timestamp + ID columns on the same row.
+function logActivity_(payload, userEmail, updates) {
+  try {
+    var sheet = getOrCreateSheet_('Order Activity');
+    var headers = [
+      'Created At', 'Session ID', 'Email Address', 'Retailer',
+      'PO Number', 'Order Date',
+      'Ship To Name', 'Ship To Address 1', 'Ship To Address 2',
+      'Ship To City', 'Ship To State', 'Ship To Zip',
+      'Bill To Name', 'Bill To Address 1', 'Bill To Address 2',
+      'Bill To City', 'Bill To State', 'Bill To Zip',
+      'Items Detail', 'Shipping', 'Tax', 'Order Total',
+      'PL Downloaded At', 'SS Submitted At', 'SS Order ID', 'SS Order Key',
+      'Asana Sent At', 'Asana Task GID',
+    ];
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(headers);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+
+    var sessionId = payload.sessionId || '';
+    var ship = payload.shipTo || {};
+    var bill = payload.billTo || {};
+    var items = payload.items || [];
+    var itemsTotal = items.reduce(function(s, i) { return s + (i.quantity * i.unitPrice); }, 0);
+    var orderTotal = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
+    var itemsDetail = items.map(function(i) {
+      return i.sku + ' x' + i.quantity + ' @$' + i.unitPrice;
+    }).join('; ');
+    var orderDate = String(payload.orderDate || '').substring(0, 10);
+
+    var snapshot = [
+      sessionId,
+      userEmail || '',
+      payload.retailer || '',
+      payload.orderNumber || '',
+      orderDate,
+      ship.name || '', ship.street1 || '', ship.street2 || '',
+      ship.city || '', ship.state || '', ship.postalCode || '',
+      bill.name || '', bill.street1 || '', bill.street2 || '',
+      bill.city || '', bill.state || '', bill.postalCode || '',
+      itemsDetail,
+      payload.shippingAmount || 0,
+      payload.taxAmount || 0,
+      orderTotal,
+    ];
+
+    var lastRow = sheet.getLastRow();
+    var rowIdx = -1;
+    if (sessionId && lastRow > 1) {
+      var sessionCol = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+      for (var i = 0; i < sessionCol.length; i++) {
+        if (sessionCol[i][0] === sessionId) { rowIdx = i + 2; break; }
+      }
+    }
+
+    var actionStartCol = 2 + snapshot.length; // 23
+
+    if (rowIdx === -1) {
+      var row = [new Date()].concat(snapshot).concat([
+        updates.plDownloadedAt || '',
+        updates.ssSubmittedAt || '',
+        updates.ssOrderId || '',
+        updates.ssOrderKey || '',
+        updates.asanaSentAt || '',
+        updates.asanaTaskGid || '',
+      ]);
+      sheet.appendRow(row);
+    } else {
+      sheet.getRange(rowIdx, 2, 1, snapshot.length).setValues([snapshot]);
+      var existing = sheet.getRange(rowIdx, actionStartCol, 1, 6).getValues()[0];
+      var merged = [
+        updates.plDownloadedAt || existing[0] || '',
+        updates.ssSubmittedAt || existing[1] || '',
+        updates.ssOrderId || existing[2] || '',
+        updates.ssOrderKey || existing[3] || '',
+        updates.asanaSentAt || existing[4] || '',
+        updates.asanaTaskGid || existing[5] || '',
+      ];
+      sheet.getRange(rowIdx, actionStartCol, 1, 6).setValues([merged]);
+    }
+  } catch (err) {
+    Logger.log('Failed to log activity: ' + err.message);
   }
 }
 
