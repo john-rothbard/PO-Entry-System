@@ -35,7 +35,12 @@ function AddressFields({ prefix, data, errors, updateField }) {
   );
 }
 
-export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
+const newSessionId = () =>
+  (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : "sess_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
+
+export default function POForm({ config, onSubmit, onSendPackingListToAsana, onLogPackingList }) {
   const emptyForm = {
     retailerId: "", poNumber: "",
     orderDate: new Date().toISOString().split("T")[0],
@@ -51,12 +56,24 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [sendingToAsana, setSendingToAsana] = useState(false);
+  const [downloadingPL, setDownloadingPL] = useState(false);
   const [attachedFile, setAttachedFile] = useState(null);
   const [showAttachPrompt, setShowAttachPrompt] = useState(false);
   const fileInputRef = useRef(null);
   const [addingProduct, setAddingProduct] = useState(false);
   const [newItem, setNewItem] = useState({ sku: "", quantity: "", unitPrice: "" });
   const [itemErrors, setItemErrors] = useState({ sku: false, quantity: false, unitPrice: false });
+
+  const [sessionId, setSessionId] = useState(() => newSessionId());
+  const [submittedToShipStation, setSubmittedToShipStation] = useState(null);
+  const [sentToAsana, setSentToAsana] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+
+  const resetSession = () => {
+    setSessionId(newSessionId());
+    setSubmittedToShipStation(null);
+    setSentToAsana(null);
+  };
 
   const retailer = config.retailers.find((r) => r.id === form.retailerId);
   const retailerAliases = config.retailerAliases[form.retailerId] || {};
@@ -152,7 +169,42 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
       validate();
       return;
     }
-    await downloadPackingListPdf(packingListInput());
+    setDownloadingPL(true);
+    try {
+      await downloadPackingListPdf(packingListInput());
+      if (onLogPackingList) {
+        try {
+          await onLogPackingList(buildLogPayload(), retailer);
+        } catch (_) { /* logging failure shouldn't block download */ }
+      }
+    } finally { setDownloadingPL(false); }
+  };
+
+  const buildLogPayload = () => {
+    const billTo = form.billToSameAsShip ? form.shipTo : form.billTo;
+    return {
+      sessionId,
+      orderNumber: form.poNumber,
+      orderDate: form.orderDate,
+      retailer: retailer?.name,
+      retailerId: form.retailerId,
+      shipTo: {
+        name: form.shipTo.name, company: form.shipTo.company || undefined,
+        street1: form.shipTo.address1, street2: form.shipTo.address2 || undefined,
+        city: form.shipTo.city, state: form.shipTo.state, postalCode: form.shipTo.zip,
+      },
+      billTo: {
+        name: billTo.name, company: billTo.company || undefined,
+        street1: billTo.address1, street2: billTo.address2 || undefined,
+        city: billTo.city, state: billTo.state, postalCode: billTo.zip,
+      },
+      items: form.lineItems.map((item) => ({
+        sku: item.sku, name: item.name, quantity: item.quantity, unitPrice: item.unitPrice,
+      })),
+      shippingAmount: Number(form.shippingPaid) || 0,
+      taxAmount: Number(form.taxPaid) || 0,
+      notes: form.notes || undefined,
+    };
   };
 
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
@@ -188,25 +240,18 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
         attachmentBase64 = await readFileAsBase64(attachedFile);
         attachmentFilename = attachedFile.name;
       }
-      await onSendPackingListToAsana({
-        orderNumber: form.poNumber,
-        orderDate: form.orderDate,
-        retailer: retailer?.name,
-        retailerId: form.retailerId,
+      const result = await onSendPackingListToAsana({
+        ...buildLogPayload(),
         asanaSectionGid: retailer?.asanaSectionGid,
-        shipTo: {
-          name: form.shipTo.name, company: form.shipTo.company || undefined,
-          street1: form.shipTo.address1, street2: form.shipTo.address2 || undefined,
-          city: form.shipTo.city, state: form.shipTo.state, postalCode: form.shipTo.zip,
-        },
-        items: form.lineItems.map((item) => ({
-          sku: item.sku, name: item.name, quantity: item.quantity, unitPrice: item.unitPrice,
-        })),
-        notes: form.notes || undefined,
         pdfBase64,
         pdfFilename: `Packing-List-${form.poNumber}.pdf`,
         attachmentBase64,
         attachmentFilename,
+      });
+      setSentToAsana({
+        taskId: result?.taskId,
+        taskUrl: result?.taskUrl,
+        at: new Date().toISOString(),
       });
       setAttachedFile(null);
     } catch (err) { /* handled in parent */ }
@@ -214,6 +259,10 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
   };
 
   const handleSendPackingListToAsana = async () => {
+    if (sentToAsana) {
+      setConfirmAction("asana");
+      return;
+    }
     setSubmitAttempted(true);
     if (!validate()) return;
     if (!attachedFile) {
@@ -224,11 +273,20 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
   };
 
   const handleSubmit = async () => {
+    if (submittedToShipStation) {
+      setConfirmAction("submit");
+      return;
+    }
+    await submitToShipStationCore();
+  };
+
+  const submitToShipStationCore = async () => {
     setSubmitAttempted(true);
     if (!validate()) return;
     setSubmitting(true);
     const billTo = form.billToSameAsShip ? form.shipTo : form.billTo;
     const payload = {
+      sessionId,
       orderNumber: form.poNumber,
       orderDate: form.orderDate === new Date().toISOString().split("T")[0]
         ? new Date().toISOString()
@@ -260,11 +318,25 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
       internalNotes: form.notes || undefined,
     };
     try {
-      await onSubmit(payload, retailer);
-      setForm(emptyForm);
-      setSubmitAttempted(false);
+      const result = await onSubmit(payload, retailer);
+      setSubmittedToShipStation({
+        orderId: result?.orderId,
+        orderKey: result?.orderKey,
+        at: new Date().toISOString(),
+      });
     } catch (err) { /* handled in parent */ }
     finally { setSubmitting(false); }
+  };
+
+  const handleClearForm = () => {
+    setForm(emptyForm);
+    setErrors({});
+    setSubmitAttempted(false);
+    setAttachedFile(null);
+    setNewItem({ sku: "", quantity: "", unitPrice: "" });
+    setItemErrors({ sku: false, quantity: false, unitPrice: false });
+    setAddingProduct(false);
+    resetSession();
   };
 
   return (
@@ -278,7 +350,10 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
               onChange={(e) => { updateField("retailerId", e.target.value); setForm((f) => ({ ...f, lineItems: [] })); }}
               placeholder="Select retailer..." options={config.retailers.map((r) => ({ value: r.id, label: r.name }))} />
             <Input label="PO Number" required value={form.poNumber} error={errors.poNumber}
-              onChange={(e) => updateField("poNumber", e.target.value)} placeholder="Enter PO #" />
+              onChange={(e) => {
+                updateField("poNumber", e.target.value);
+                if (submittedToShipStation || sentToAsana) resetSession();
+              }} placeholder="Enter PO #" />
             <Input label="Age" type="date" value={form.orderDate}
               onChange={(e) => updateField("orderDate", e.target.value)} />
           </div>
@@ -459,20 +534,39 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
             <span>Total</span>
             <span style={{ fontFamily: "var(--mono)", color: "var(--success)" }}>${totalOrder.toFixed(2)}</span>
           </div>
-          <Button variant="success" size="lg" onClick={handleSubmit} disabled={submitting}
-            icon={submitting ? null : <Icons.send size={16} />}
-            style={{ width: "100%", justifyContent: "center", marginTop: 20 }}>
-            {submitting ? "Submitting..." : "Submit Order to ShipStation"}
+          <Button
+            variant={submittedToShipStation ? "secondary" : "success"}
+            size="lg" onClick={handleSubmit} disabled={submitting}
+            icon={submitting ? null : (submittedToShipStation ? <Icons.check size={16} color="var(--success)" /> : <Icons.send size={16} />)}
+            style={{
+              width: "100%", justifyContent: "center", marginTop: 20,
+              ...(submittedToShipStation ? {
+                background: "var(--success-bg)", color: "var(--success)",
+                border: "1px solid var(--success)",
+              } : {}),
+            }}>
+            {submitting ? "Submitting..." : submittedToShipStation
+              ? `Submitted to ShipStation${submittedToShipStation.orderId ? ` (SS#${submittedToShipStation.orderId})` : ""}`
+              : "Submit Order to ShipStation"}
           </Button>
-          <Button variant="secondary" size="md" onClick={handleSendPackingListToAsana}
+          <Button
+            variant="secondary" size="md" onClick={handleSendPackingListToAsana}
             disabled={sendingToAsana}
-            style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
-            {sendingToAsana ? "Sending..." : "Send PL to Asana"}
+            icon={sentToAsana ? <Icons.check size={14} color="var(--success)" /> : null}
+            style={{
+              width: "100%", justifyContent: "center", marginTop: 8,
+              ...(sentToAsana ? {
+                background: "var(--success-bg)", color: "var(--success)",
+                border: "1px solid var(--success)",
+              } : {}),
+            }}>
+            {sendingToAsana ? "Sending..." : sentToAsana ? "Sent to Asana" : "Send PL to Asana"}
           </Button>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
             <Button variant="secondary" size="sm" onClick={handleDownloadPackingList}
+              disabled={downloadingPL}
               style={{ justifyContent: "center" }}>
-              Download PL
+              {downloadingPL ? "Downloading..." : "Download PL"}
             </Button>
             <Button variant="secondary" size="sm" onClick={openAttachPicker}
               style={{ justifyContent: "center" }}>
@@ -497,6 +591,10 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
             </div>
           )}
           <input ref={fileInputRef} type="file" onChange={onFileSelected} style={{ display: "none" }} />
+          <Button variant="ghost" size="sm" onClick={() => setConfirmAction("clear")}
+            style={{ width: "100%", justifyContent: "center", marginTop: 12, color: "var(--text-muted)" }}>
+            Clear Form
+          </Button>
           {submitAttempted && getMissingFields().length > 0 && (
             <p style={{
               marginTop: 12, fontSize: 13, color: "var(--danger)", textAlign: "center", lineHeight: 1.5,
@@ -534,6 +632,51 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana }) {
                   await sendToAsanaCore();
                 }}>
                   Send Without
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmAction && (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}>
+            <div style={{
+              background: "var(--bg-card)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border)",
+              maxWidth: 420, width: "100%", padding: 24, boxShadow: "0 16px 64px rgba(0,0,0,0.5)",
+            }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>
+                {confirmAction === "submit" && "Re-submit to ShipStation?"}
+                {confirmAction === "asana" && "Re-send to Asana?"}
+                {confirmAction === "clear" && "Clear the form?"}
+              </h3>
+              <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 20 }}>
+                {confirmAction === "submit" && `This PO was already submitted${submittedToShipStation?.orderId ? ` (SS#${submittedToShipStation.orderId})` : ""}. Submitting again will create a duplicate order in ShipStation.`}
+                {confirmAction === "asana" && "An Asana task was already created for this PO. Sending again will create a second task."}
+                {confirmAction === "clear" && "This will wipe all fields and reset submission status."}
+              </p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmAction(null)}>Cancel</Button>
+                <Button variant={confirmAction === "clear" ? "danger" : "primary"} size="sm"
+                  onClick={async () => {
+                    const action = confirmAction;
+                    setConfirmAction(null);
+                    if (action === "submit") {
+                      setSubmittedToShipStation(null);
+                      await submitToShipStationCore();
+                    } else if (action === "asana") {
+                      setSentToAsana(null);
+                      if (!attachedFile) { setShowAttachPrompt(true); return; }
+                      await sendToAsanaCore();
+                    } else if (action === "clear") {
+                      handleClearForm();
+                    }
+                  }}>
+                  {confirmAction === "submit" && "Yes, submit again"}
+                  {confirmAction === "asana" && "Yes, send again"}
+                  {confirmAction === "clear" && "Yes, clear"}
                 </Button>
               </div>
             </div>
