@@ -204,6 +204,7 @@ function shipStationRequest_(endpoint, method, payload) {
 // ── Create Order ────────────────────────────────────────────
 function handleCreateOrder_(payload, userEmail) {
   if (!payload || !payload.orderNumber) {
+    recordFailure_('SS Submitted', payload, userEmail, 'Missing order payload');
     return createCorsResponse({ error: 'Missing order payload' }, 400);
   }
 
@@ -227,7 +228,7 @@ function handleCreateOrder_(payload, userEmail) {
 
   } catch (err) {
     logOrder_(payload, null, 'FAILED: ' + err.message, userEmail);
-    logAction_('SS Submitted', 'error', payload, userEmail, err.message);
+    recordFailure_('SS Submitted', payload, userEmail, err.message);
     return createCorsResponse({ error: err.message }, 502);
   }
 }
@@ -370,19 +371,22 @@ function handleCreateAsanaTask_(payload, userEmail) {
 
 function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
   if (!payload || !payload.orderNumber) {
+    recordFailure_('Asana Sent', payload, userEmail, 'Missing order data');
     return createCorsResponse({ error: 'Missing order data' }, 400);
   }
   if (!payload.pdfBase64) {
+    recordFailure_('Asana Sent', payload, userEmail, 'Missing PDF data');
     return createCorsResponse({ error: 'Missing PDF data' }, 400);
   }
   if (CONFIG.ASANA_PAT === 'YOUR_ASANA_PAT') {
+    recordFailure_('Asana Sent', payload, userEmail, 'Asana not configured (ASANA_PAT)');
     return createCorsResponse({ error: 'Asana is not configured. Set ASANA_PAT in Apps Script.' }, 500);
   }
   if (!payload.asanaSectionGid) {
-    return createCorsResponse({
-      error: 'No Asana section configured for retailer "' + (payload.retailer || 'Unknown')
-        + '". Open Config → Retailers and set its Asana Section GID.'
-    }, 400);
+    var msg = 'No Asana section configured for retailer "' + (payload.retailer || 'Unknown')
+      + '". Open Config → Retailers and set its Asana Section GID.';
+    recordFailure_('Asana Sent', payload, userEmail, msg);
+    return createCorsResponse({ error: msg }, 400);
   }
 
   try {
@@ -461,7 +465,7 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
     });
 
   } catch (err) {
-    logAction_('Asana Sent', 'error', payload, userEmail, err.message);
+    recordFailure_('Asana Sent', payload, userEmail, err.message);
     return createCorsResponse({ error: 'Asana: ' + err.message }, 502);
   }
 }
@@ -469,6 +473,7 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
 // ── Log Packing List Download ──────────────────────────────
 function handleLogPackingList_(payload, userEmail) {
   if (!payload || !payload.orderNumber) {
+    recordFailure_('PL Downloaded', payload, userEmail, 'Missing order data');
     return createCorsResponse({ error: 'Missing order data' }, 400);
   }
   try {
@@ -476,6 +481,7 @@ function handleLogPackingList_(payload, userEmail) {
     logAction_('PL Downloaded', 'success', payload, userEmail, '');
     return createCorsResponse({ success: true });
   } catch (err) {
+    recordFailure_('PL Downloaded', payload, userEmail, err.message);
     return createCorsResponse({ error: err.message }, 500);
   }
 }
@@ -559,9 +565,11 @@ function logOrder_(payload, result, status, userEmail) {
 
 // ── Order Activity (sessionId-keyed upsert) ────────────────
 // One row per "session" (form fill). PL download / SS submit / Asana send
-// each fill in their own timestamp + ID columns on the same row.
+// each fill in their own timestamp + ID columns on the same row. Failures
+// don't fill the timestamp but do update Status + Last Attempt cells.
 function logActivity_(payload, userEmail, updates) {
   try {
+    if (!payload) return;
     var sheet = getOrCreateSheet_('Order Activity');
     var headers = [
       'Created At', 'Session ID', 'Email Address', 'Retailer',
@@ -573,11 +581,19 @@ function logActivity_(payload, userEmail, updates) {
       'Items Detail', 'Shipping', 'Tax', 'Order Total',
       'PL Downloaded At', 'SS Submitted At', 'SS Order ID', 'SS Order Key',
       'Asana Sent At', 'Asana Task GID',
+      'Status', 'Last Attempt',
     ];
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(headers);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
       sheet.setFrozenRows(1);
+    } else {
+      var currentLastCol = sheet.getLastColumn();
+      if (currentLastCol < headers.length) {
+        sheet.getRange(1, currentLastCol + 1, 1, headers.length - currentLastCol)
+          .setValues([headers.slice(currentLastCol)])
+          .setFontWeight('bold');
+      }
     }
 
     var sessionId = payload.sessionId || '';
@@ -617,32 +633,78 @@ function logActivity_(payload, userEmail, updates) {
     }
 
     var actionStartCol = 2 + snapshot.length; // 23
+    var actionCellCount = 6;
+    var existing = (rowIdx === -1)
+      ? ['', '', '', '', '', '']
+      : sheet.getRange(rowIdx, actionStartCol, 1, actionCellCount).getValues()[0];
+
+    var merged = [
+      updates.plDownloadedAt || existing[0] || '',
+      updates.ssSubmittedAt || existing[1] || '',
+      updates.ssOrderId || existing[2] || '',
+      updates.ssOrderKey || existing[3] || '',
+      updates.asanaSentAt || existing[4] || '',
+      updates.asanaTaskGid || existing[5] || '',
+    ];
+
+    // Cumulative status from successful action timestamps
+    var statusParts = [];
+    if (merged[0]) statusParts.push('PL');
+    if (merged[1]) statusParts.push('Submitted');
+    if (merged[4]) statusParts.push('Asana');
+    var status = statusParts.length === 3
+      ? 'Complete'
+      : (statusParts.length ? statusParts.join(' + ') : 'Pending');
+
+    // Latest attempt summary (success or error) derived from this call's updates
+    var lastAction, lastResult, lastErr;
+    if (updates.plDownloadedAt)      { lastAction = 'PL Downloaded'; lastResult = 'success'; }
+    else if (updates.ssSubmittedAt)  { lastAction = 'SS Submitted';  lastResult = 'success'; }
+    else if (updates.asanaSentAt)    { lastAction = 'Asana Sent';    lastResult = 'success'; }
+    else if (updates.plError)        { lastAction = 'PL Downloaded'; lastResult = 'error'; lastErr = updates.plError; }
+    else if (updates.ssError)        { lastAction = 'SS Submitted';  lastResult = 'error'; lastErr = updates.ssError; }
+    else if (updates.asanaError)     { lastAction = 'Asana Sent';    lastResult = 'error'; lastErr = updates.asanaError; }
+    var lastAttempt = lastAction
+      ? (lastResult === 'success' ? '✓ ' : '✗ ') + lastAction + (lastErr ? ': ' + lastErr : '')
+      : '';
 
     if (rowIdx === -1) {
-      var row = [new Date()].concat(snapshot).concat([
-        updates.plDownloadedAt || '',
-        updates.ssSubmittedAt || '',
-        updates.ssOrderId || '',
-        updates.ssOrderKey || '',
-        updates.asanaSentAt || '',
-        updates.asanaTaskGid || '',
-      ]);
+      var row = [new Date()].concat(snapshot).concat(merged).concat([status, lastAttempt]);
       sheet.appendRow(row);
+      rowIdx = sheet.getLastRow();
     } else {
       sheet.getRange(rowIdx, 2, 1, snapshot.length).setValues([snapshot]);
-      var existing = sheet.getRange(rowIdx, actionStartCol, 1, 6).getValues()[0];
-      var merged = [
-        updates.plDownloadedAt || existing[0] || '',
-        updates.ssSubmittedAt || existing[1] || '',
-        updates.ssOrderId || existing[2] || '',
-        updates.ssOrderKey || existing[3] || '',
-        updates.asanaSentAt || existing[4] || '',
-        updates.asanaTaskGid || existing[5] || '',
-      ];
-      sheet.getRange(rowIdx, actionStartCol, 1, 6).setValues([merged]);
+      sheet.getRange(rowIdx, actionStartCol, 1, actionCellCount).setValues([merged]);
+      var statusCol = actionStartCol + actionCellCount; // 29
+      // preserve previous Last Attempt if this call carries no action (defensive)
+      var prevLast = sheet.getRange(rowIdx, statusCol + 1).getValue();
+      sheet.getRange(rowIdx, statusCol, 1, 2).setValues([[status, lastAttempt || prevLast || '']]);
+    }
+
+    // Color the Status cell
+    var statusCol2 = actionStartCol + actionCellCount;
+    var statusCell = sheet.getRange(rowIdx, statusCol2);
+    if (lastResult === 'error') {
+      statusCell.setBackground('#f8d7da').setFontColor('#721c24');
+    } else if (status === 'Complete') {
+      statusCell.setBackground('#d4edda').setFontColor('#155724');
+    } else {
+      statusCell.setBackground(null).setFontColor(null);
     }
   } catch (err) {
     Logger.log('Failed to log activity: ' + err.message);
+  }
+}
+
+// ── recordFailure_: log a failure to both sheets in one call ───
+function recordFailure_(action, payload, userEmail, errorMessage) {
+  logAction_(action, 'error', payload || {}, userEmail, errorMessage);
+  if (payload && payload.sessionId) {
+    var updates = {};
+    if (action === 'SS Submitted') updates.ssError = errorMessage;
+    else if (action === 'Asana Sent') updates.asanaError = errorMessage;
+    else if (action === 'PL Downloaded') updates.plError = errorMessage;
+    logActivity_(payload, userEmail, updates);
   }
 }
 
