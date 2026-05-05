@@ -215,6 +215,7 @@ function handleCreateOrder_(payload, userEmail) {
       ssOrderId: result.orderId,
       ssOrderKey: result.orderKey,
     });
+    logAction_('SS Submitted', 'success', payload, userEmail, 'SS#' + result.orderId);
 
     return createCorsResponse({
       success: true,
@@ -226,6 +227,7 @@ function handleCreateOrder_(payload, userEmail) {
 
   } catch (err) {
     logOrder_(payload, null, 'FAILED: ' + err.message, userEmail);
+    logAction_('SS Submitted', 'error', payload, userEmail, err.message);
     return createCorsResponse({ error: err.message }, 502);
   }
 }
@@ -449,6 +451,7 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
       asanaSentAt: new Date(),
       asanaTaskGid: taskGid,
     });
+    logAction_('Asana Sent', 'success', payload, userEmail, 'Task ' + taskGid);
 
     return createCorsResponse({
       success: true,
@@ -458,6 +461,7 @@ function handleCreateAsanaTaskWithAttachment_(payload, userEmail) {
     });
 
   } catch (err) {
+    logAction_('Asana Sent', 'error', payload, userEmail, err.message);
     return createCorsResponse({ error: 'Asana: ' + err.message }, 502);
   }
 }
@@ -469,6 +473,7 @@ function handleLogPackingList_(payload, userEmail) {
   }
   try {
     logActivity_(payload, userEmail, { plDownloadedAt: new Date() });
+    logAction_('PL Downloaded', 'success', payload, userEmail, '');
     return createCorsResponse({ success: true });
   } catch (err) {
     return createCorsResponse({ error: err.message }, 500);
@@ -638,6 +643,54 @@ function logActivity_(payload, userEmail, updates) {
     }
   } catch (err) {
     Logger.log('Failed to log activity: ' + err.message);
+  }
+}
+
+// ── Action Log (append-only event log) ─────────────────────
+// One row per action attempt (success or failure). Carries Session ID
+// so rows can be joined back to the Order Activity row.
+function logAction_(action, status, payload, userEmail, detail) {
+  try {
+    var sheet = getOrCreateSheet_('Action Log');
+    var headers = [
+      'Timestamp', 'Action', 'Status', 'Session ID', 'Email Address',
+      'Retailer', 'PO Number', 'Order Date',
+      'Items', 'Order Total', 'Detail',
+    ];
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(headers);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+    var items = payload.items || [];
+    var itemsTotal = items.reduce(function(s, i) { return s + (i.quantity * i.unitPrice); }, 0);
+    var orderTotal = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
+    var totalUnits = items.reduce(function(s, i) { return s + (i.quantity || 0); }, 0);
+    var itemSummary = items.length + ' line(s), ' + totalUnits + ' units';
+
+    sheet.appendRow([
+      new Date(),
+      action,
+      status,
+      payload.sessionId || '',
+      userEmail || '',
+      payload.retailer || '',
+      payload.orderNumber || '',
+      String(payload.orderDate || '').substring(0, 10),
+      itemSummary,
+      orderTotal,
+      detail || '',
+    ]);
+
+    var lastRow = sheet.getLastRow();
+    var statusCell = sheet.getRange(lastRow, 3);
+    if (status === 'success') {
+      statusCell.setBackground('#d4edda').setFontColor('#155724');
+    } else {
+      statusCell.setBackground('#f8d7da').setFontColor('#721c24');
+    }
+  } catch (err) {
+    Logger.log('Failed to log action: ' + err.message);
   }
 }
 
