@@ -43,7 +43,7 @@ const newSessionId = () =>
 export default function POForm({ config, onSubmit, onSendPackingListToAsana, onLogPackingList }) {
   const emptyForm = {
     retailerId: "", poNumber: "",
-    orderDate: new Date().toISOString().split("T")[0],
+    orderDate: "",
     shipTo: { name: "", company: "", address1: "", address2: "", city: "", state: "", zip: "", phone: "", email: "" },
     billTo: { name: "", company: "", address1: "", address2: "", city: "", state: "", zip: "", phone: "", email: "" },
     billToSameAsShip: true,
@@ -132,6 +132,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
     const errs = {};
     if (!form.retailerId) errs.retailerId = "Required";
     if (!form.poNumber.trim()) errs.poNumber = "Required";
+    if (!form.orderDate) errs.orderDate = "Required";
     if (!form.shipTo.name.trim()) errs["shipTo.name"] = "Required";
     if (!form.shipTo.address1.trim()) errs["shipTo.address1"] = "Required";
     if (!form.shipTo.city.trim()) errs["shipTo.city"] = "Required";
@@ -146,6 +147,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
     const missing = [];
     if (!form.retailerId) missing.push("Retailer");
     if (!form.poNumber.trim()) missing.push("PO Number");
+    if (!form.orderDate) missing.push("Ship by Date");
     if (!form.shipTo.name.trim()) missing.push("Name");
     if (!form.shipTo.address1.trim()) missing.push("Address");
     if (!form.shipTo.city.trim()) missing.push("City");
@@ -157,7 +159,8 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
 
   const packingListInput = () => ({
     poNumber: form.poNumber,
-    orderDate: form.orderDate,
+    orderDate: new Date().toISOString().split("T")[0],
+    shipDate: form.orderDate,
     lineItems: form.lineItems,
     shipTo: form.shipTo,
     notes: form.notes,
@@ -288,9 +291,8 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
     const payload = {
       sessionId,
       orderNumber: form.poNumber,
-      orderDate: form.orderDate === new Date().toISOString().split("T")[0]
-        ? new Date().toISOString()
-        : new Date(form.orderDate + "T12:00:00").toISOString(),
+      orderDate: new Date().toISOString(),
+      shipByDate: new Date(form.orderDate + "T12:00:00").toISOString(),
       paymentDate: new Date().toISOString(),
       orderStatus: "awaiting_shipment",
       customerEmail: form.shipTo.email || undefined,
@@ -354,7 +356,8 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
                 updateField("poNumber", e.target.value);
                 if (submittedToShipStation || sentToAsana) resetSession();
               }} placeholder="Enter PO #" />
-            <Input label="Age" type="date" value={form.orderDate}
+            <Input label="Ship by Date" required type="date" value={form.orderDate}
+              error={errors.orderDate}
               onChange={(e) => updateField("orderDate", e.target.value)} />
           </div>
           {retailer && (

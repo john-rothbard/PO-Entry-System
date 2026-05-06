@@ -63,9 +63,8 @@ function fillCell(text) {
   return { text, fillColor: YELLOW, alignment: 'center' };
 }
 
-export function buildPackingListDocDef({ poNumber, orderDate, lineItems, shipTo, notes, logoDataUrl }) {
+export function buildPackingListDocDef({ poNumber, orderDate, shipDate, lineItems, shipTo, notes, logoDataUrl }) {
   const totalOrdered = lineItems.reduce((a, b) => a + Number(b.quantity || 0), 0);
-  const shipDate = orderDate;
 
   const itemRows = [];
   for (let i = 0; i < ROW_COUNT; i++) {
