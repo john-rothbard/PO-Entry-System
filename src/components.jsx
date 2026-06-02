@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // ── Styles (injected once) ──────────────────────────────────
 export const globalCSS = `
@@ -158,6 +158,99 @@ export const Select = ({ label, required, error, options = [], placeholder, styl
     {error && <span style={{ fontSize: 12, color: "var(--danger)" }}>{error}</span>}
   </div>
 );
+
+// Searchable dropdown: click to open the full list (like Select) OR type to
+// filter by substring (e.g. "best" matches "RETAIL - Best Mattress").
+// onChange receives the selected value directly (not an event).
+export const Combobox = ({ label, required, error, options = [], placeholder, value, onChange, style = {} }) => {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const wrapRef = useRef(null);
+
+  const selected = options.find((o) => o.value === value);
+  const q = query.trim().toLowerCase();
+  const filtered = editing && q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) { setOpen(false); setEditing(false); setQuery(""); }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  useEffect(() => { setHighlight(0); }, [query, open]);
+
+  const choose = (opt) => { onChange?.(opt.value); setOpen(false); setEditing(false); setQuery(""); };
+
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (!open) setOpen(true); else setHighlight((h) => Math.min(h + 1, filtered.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)); }
+    else if (e.key === "Enter") { if (open && filtered[highlight]) { e.preventDefault(); choose(filtered[highlight]); } }
+    else if (e.key === "Escape") { setOpen(false); setEditing(false); setQuery(""); }
+  };
+
+  const displayValue = editing ? query : (selected?.label || "");
+
+  return (
+    <div ref={wrapRef} style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
+      {label && (
+        <label style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)" }}>
+          {label}{required && <span style={{ color: "var(--danger)", marginLeft: 2 }}>*</span>}
+        </label>
+      )}
+      <div style={{ position: "relative" }}>
+        <input
+          value={displayValue}
+          placeholder={placeholder}
+          onChange={(e) => { setQuery(e.target.value); setEditing(true); if (!open) setOpen(true); }}
+          onFocus={(e) => { setOpen(true); e.target.select(); e.target.style.borderColor = "var(--border-focus)"; }}
+          onBlur={(e) => { e.target.style.borderColor = error ? "var(--danger)" : "var(--border)"; }}
+          onKeyDown={onKeyDown}
+          style={{
+            width: "100%", padding: "9px 32px 9px 12px", background: "var(--bg-input)",
+            border: `1px solid ${error ? "var(--danger)" : "var(--border)"}`, borderRadius: "var(--radius)",
+            color: (editing || selected) ? "var(--text)" : "var(--text-muted)", fontSize: 14,
+            fontFamily: "var(--font)", outline: "none", transition: "border-color 0.15s", cursor: "pointer",
+          }}
+        />
+        <div
+          onMouseDown={(e) => { e.preventDefault(); setOpen((o) => !o); }}
+          style={{ position: "absolute", top: 0, right: 0, height: "100%", width: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+        >
+          <Icons.chevDown size={14} color="#8B90A0" />
+        </div>
+        {open && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 20,
+            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius)",
+            boxShadow: "var(--shadow)", maxHeight: 260, overflowY: "auto", padding: 4,
+          }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: "9px 12px", fontSize: 14, color: "var(--text-muted)" }}>No matches</div>
+            ) : filtered.map((o, i) => (
+              <div
+                key={o.value}
+                onMouseDown={(e) => { e.preventDefault(); choose(o); }}
+                onMouseEnter={() => setHighlight(i)}
+                style={{
+                  padding: "9px 12px", fontSize: 14, borderRadius: "calc(var(--radius) - 2px)", cursor: "pointer",
+                  background: i === highlight ? "var(--bg-hover)" : "transparent",
+                  color: o.value === value ? "var(--accent)" : "var(--text)",
+                  fontWeight: o.value === value ? 600 : 400,
+                }}
+              >{o.label}</div>
+            ))}
+          </div>
+        )}
+      </div>
+      {error && <span style={{ fontSize: 12, color: "var(--danger)" }}>{error}</span>}
+    </div>
+  );
+};
 
 export const Button = ({ children, variant = "primary", size = "md", icon, style = {}, ...props }) => {
   const variants = {

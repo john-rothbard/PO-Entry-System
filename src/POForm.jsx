@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
-import { Icons, Badge, Input, Select, Button, Card, Divider } from './components';
+import { Icons, Badge, Input, Select, Combobox, Button, Card, Divider } from './components';
 import { US_STATES } from './config';
 import { downloadPackingListPdf, getPackingListPdfBase64 } from './packingList';
 
@@ -348,9 +348,9 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
         <Card>
           <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Order Info</h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <Select label="Retailer" required value={form.retailerId} error={errors.retailerId}
-              onChange={(e) => { updateField("retailerId", e.target.value); setForm((f) => ({ ...f, lineItems: [] })); }}
-              placeholder="Select retailer..." options={config.retailers.map((r) => ({ value: r.id, label: r.name }))} />
+            <Combobox label="Retailer" required value={form.retailerId} error={errors.retailerId}
+              onChange={(val) => { updateField("retailerId", val); setForm((f) => ({ ...f, lineItems: [] })); }}
+              placeholder="Search or select retailer..." options={config.retailers.map((r) => ({ value: r.id, label: r.name }))} />
             <Input label="PO Number" required value={form.poNumber} error={errors.poNumber}
               onChange={(e) => {
                 updateField("poNumber", e.target.value);
