@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
-import { Icons, Badge, Input, Select, Button, Card, Divider } from './components';
+import { Icons, Badge, Input, Select, Combobox, Button, Card, Divider } from './components';
 import { US_STATES } from './config';
 import { downloadPackingListPdf, getPackingListPdfBase64 } from './packingList';
 
@@ -348,9 +348,9 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
         <Card>
           <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Order Info</h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <Select label="Retailer" required value={form.retailerId} error={errors.retailerId}
-              onChange={(e) => { updateField("retailerId", e.target.value); setForm((f) => ({ ...f, lineItems: [] })); }}
-              placeholder="Select retailer..." options={config.retailers.map((r) => ({ value: r.id, label: r.name }))} />
+            <Combobox label="Retailer" required value={form.retailerId} error={errors.retailerId}
+              onChange={(val) => { updateField("retailerId", val); setForm((f) => ({ ...f, lineItems: [] })); }}
+              placeholder="Search or select retailer..." options={config.retailers.map((r) => ({ value: r.id, label: r.name }))} />
             <Input label="PO Number" required value={form.poNumber} error={errors.poNumber}
               onChange={(e) => {
                 updateField("poNumber", e.target.value);
@@ -443,13 +443,13 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
             <form onSubmit={(e) => { e.preventDefault(); addLineItem(); }}
               style={{ padding: 14, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px dashed var(--border-focus)" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 120px", gap: 10, marginBottom: 10 }}>
-                <Select label="Product" value={newItem.sku}
+                <Combobox label="Product" value={newItem.sku}
                   error={itemErrors.sku}
-                  onChange={(e) => { setNewItem({ ...newItem, sku: e.target.value }); setItemErrors((er) => ({ ...er, sku: false })); }}
-                  placeholder="Select product..."
+                  onChange={(val) => { setNewItem({ ...newItem, sku: val }); setItemErrors((er) => ({ ...er, sku: false })); }}
+                  placeholder="Search or select product..."
                   options={availableProducts.map((p) => {
                     const name = p.retailerName.length > 40 ? p.retailerName.slice(0, 40) + '...' : p.retailerName;
-                    return { value: p.sku, label: `${name} → ${p.sku}` };
+                    return { value: p.sku, label: `${name} → ${p.sku}`, keywords: `${p.sku} ${p.name} ${p.retailerName}` };
                   })} />
                 <Input label="Quantity" type="number" min="1" value={newItem.quantity}
                   error={itemErrors.quantity}
