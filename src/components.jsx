@@ -161,6 +161,8 @@ export const Select = ({ label, required, error, options = [], placeholder, styl
 
 // Searchable dropdown: click to open the full list (like Select) OR type to
 // filter by substring (e.g. "best" matches "RETAIL - Best Mattress").
+// Each option may carry an optional `keywords` string (extra terms to match
+// against beyond the visible label, e.g. master + alias SKUs).
 // onChange receives the selected value directly (not an event).
 export const Combobox = ({ label, required, error, options = [], placeholder, value, onChange, style = {} }) => {
   const [open, setOpen] = useState(false);
@@ -171,7 +173,9 @@ export const Combobox = ({ label, required, error, options = [], placeholder, va
 
   const selected = options.find((o) => o.value === value);
   const q = query.trim().toLowerCase();
-  const filtered = editing && q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+  const filtered = editing && q
+    ? options.filter((o) => `${o.label} ${o.keywords || ""}`.toLowerCase().includes(q))
+    : options;
 
   useEffect(() => {
     if (!open) return;
