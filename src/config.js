@@ -1,3 +1,13 @@
+// ── EDI Sheet Sync defaults ──────────────────────────────────
+// Baked-in fallback spreadsheet IDs for EDI trading-partner retailers,
+// keyed by retailer id. A retailer's own `ediSheetId` (set in Config →
+// Retailers) always wins; this default is only used when that field is
+// blank. Keyed by id (stable) rather than name to avoid apostrophe/spacing
+// mismatches. Add the other EDI partners here (or via the Config UI).
+export const EDI_SHEET_DEFAULTS = {
+  ret_1040656: "1pvs6znQ2Dk7N12cMiUGbrH7X5j6BhozEo1pqpV2fADg", // Retail - Sit 'n Sleep
+};
+
 export const DEFAULT_CONFIG = {
   retailers: [
     { id: "ret_1", name: "Nordstrom", shipStationStoreId: 12345, salesChannel: "Nordstrom" },

@@ -218,11 +218,31 @@ function handleCreateOrder_(payload, userEmail) {
     });
     logAction_('SS Submitted', 'success', payload, userEmail, 'SS#' + result.orderId);
 
+    // ── EDI trading-partner sheet sync (best-effort, isolated) ──
+    // Append one row to the per-retailer EDI spreadsheet when the retailer
+    // has an ediSheetId. Wrapped so a sheet failure can never undo the
+    // ShipStation order — but the failure IS surfaced to the UI (ediSheetError)
+    // per spec, since the sheet row is part of "success" for EDI partners.
+    var ediSheetError = null;
+    var ediSheetSynced = false;
+    if (payload.ediSheetId) {
+      try {
+        appendEdiRow_(payload);
+        ediSheetSynced = true;
+        logAction_('EDI Synced', 'success', payload, userEmail, payload.ediSheetId);
+      } catch (ediErr) {
+        ediSheetError = ediErr.message;
+        logAction_('EDI Synced', 'error', payload, userEmail, ediErr.message);
+      }
+    }
+
     return createCorsResponse({
       success: true,
       orderId: result.orderId,
       orderNumber: result.orderNumber,
       orderKey: result.orderKey,
+      ediSheetSynced: ediSheetSynced,
+      ediSheetError: ediSheetError,
       message: 'Order created in ShipStation',
     });
 
@@ -231,6 +251,59 @@ function handleCreateOrder_(payload, userEmail) {
     recordFailure_('SS Submitted', payload, userEmail, err.message);
     return createCorsResponse({ error: err.message }, 502);
   }
+}
+
+// ── EDI Sheet Sync ──────────────────────────────────────────
+// Appends one "850 Purchase Order" row to a per-retailer EDI spreadsheet
+// (identified by payload.ediSheetId). Throws on any failure so the caller
+// can surface it to the UI. See EDI_SHEET_COLUMNS for the layout.
+var EDI_SHEET_COLUMNS = [
+  'Trading Partner',              // 1
+  'EDI Transaction Type / Notes', // 2
+  'PO Number',                    // 3
+  'Invoice Number',               // 4
+  'Txn Amount',                   // 5
+  'Received Date',                // 6
+  'Delivered Date',               // 7
+  'Action Status',                // 8
+  'Commission',                   // 9
+  'P/P',                          // 10
+  'Notes',                        // 11
+];
+
+function appendEdiRow_(payload) {
+  var ss = SpreadsheetApp.openById(payload.ediSheetId);
+  // Per-partner spreadsheet: write to its first/active sheet.
+  var sheet = ss.getSheets()[0];
+
+  // Header row (bold + frozen) on first write.
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(EDI_SHEET_COLUMNS);
+    sheet.getRange(1, 1, 1, EDI_SHEET_COLUMNS.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+
+  var items = payload.items || [];
+  var itemsTotal = items.reduce(function (s, i) { return s + (i.quantity * i.unitPrice); }, 0);
+  var txnAmount = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
+
+  sheet.appendRow([
+    payload.retailer || '',        // 1 Trading Partner
+    '850 Purchase Order',          // 2 EDI Transaction Type / Notes
+    payload.orderNumber || '',     // 3 PO Number
+    '',                            // 4 Invoice Number (blank)
+    txnAmount,                     // 5 Txn Amount
+    new Date(),                    // 6 Received Date (submission timestamp)
+    '',                            // 7 Delivered Date (blank)
+    'Pending',                     // 8 Action Status
+    '',                            // 9 Commission (blank)
+    'Pending',                     // 10 P/P
+    payload.notes || '',           // 11 Notes
+  ]);
+
+  // Highlight the Action Status cell (column 8) yellow.
+  var lastRow = sheet.getLastRow();
+  sheet.getRange(lastRow, 8).setBackground('#fff3cd');
 }
 
 // ── Get Stores ──────────────────────────────────────────────

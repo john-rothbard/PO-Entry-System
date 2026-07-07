@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Icons, Badge, Input, Button, Divider } from './components';
+import { EDI_SHEET_DEFAULTS } from './config';
 
 export default function AdminPanel({ config, setConfig, onClose, onFetchStores, onFetchProducts }) {
   const [tab, setTab] = useState("retailers");
   const [editingAlias, setEditingAlias] = useState(null);
-  const [newRetailer, setNewRetailer] = useState({ name: "", shipStationStoreId: "", salesChannel: "", asanaSectionGid: "" });
+  const [newRetailer, setNewRetailer] = useState({ name: "", shipStationStoreId: "", salesChannel: "", asanaSectionGid: "", ediSheetId: "" });
   const [newSku, setNewSku] = useState({ sku: "", name: "", category: "" });
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -133,7 +134,7 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
           {tab === "retailers" && (
             <div>
               <div style={{
-                display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8, marginBottom: 16,
+                display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr auto", gap: 8, marginBottom: 16,
                 padding: 16, background: "var(--bg)", borderRadius: "var(--radius)", border: "1px solid var(--border)",
               }}>
                 <Input placeholder="Retailer Name" value={newRetailer.name}
@@ -144,12 +145,17 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
                   onChange={(e) => setNewRetailer({ ...newRetailer, salesChannel: e.target.value })} />
                 <Input placeholder="Asana Section GID" value={newRetailer.asanaSectionGid}
                   onChange={(e) => setNewRetailer({ ...newRetailer, asanaSectionGid: e.target.value })} />
+                <Input placeholder="EDI Sheet ID (optional)" value={newRetailer.ediSheetId}
+                  onChange={(e) => setNewRetailer({ ...newRetailer, ediSheetId: e.target.value })} />
                 <Button onClick={addRetailer} icon={<Icons.plus size={16} />} size="sm">Add</Button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {config.retailers.map((r) => (
+                {config.retailers.map((r) => {
+                  const ediDefault = EDI_SHEET_DEFAULTS[r.id];
+                  const ediActive = r.ediSheetId || ediDefault;
+                  return (
                   <div key={r.id} style={{
-                    display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto",
+                    display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr auto",
                     gap: 12, padding: "10px 14px", alignItems: "center",
                     borderRadius: "var(--radius)", background: "var(--bg)", border: "1px solid var(--border)",
                   }}>
@@ -167,9 +173,22 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
                         fontFamily: "var(--mono)", outline: "none",
                       }}
                     />
+                    <input
+                      placeholder={ediDefault ? `Default: ${ediDefault.slice(0, 10)}…` : "EDI Sheet ID"}
+                      value={r.ediSheetId || ""}
+                      onChange={(e) => updateRetailer(r.id, { ediSheetId: e.target.value })}
+                      title={ediDefault && !r.ediSheetId ? `Using baked-in default sheet: ${ediDefault}` : ""}
+                      style={{
+                        padding: "6px 10px", background: "var(--bg-input)",
+                        border: `1px solid ${ediActive ? "var(--success)" : "var(--border)"}`,
+                        borderRadius: "var(--radius)", color: "var(--text)", fontSize: 13,
+                        fontFamily: "var(--mono)", outline: "none",
+                      }}
+                    />
                     <Button variant="danger" size="sm" onClick={() => removeRetailer(r.id)} icon={<Icons.trash size={14} />} />
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

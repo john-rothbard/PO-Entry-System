@@ -92,10 +92,24 @@ export default function App() {
       setRecentOrders((prev) => [...prev, {
         action: "shipstation",
         retailer: retailer?.name, poNumber: payload.orderNumber,
-        status: "success", timestamp: new Date().toLocaleTimeString(),
+        status: result.ediSheetError ? "error" : "success",
+        timestamp: new Date().toLocaleTimeString(),
         shipStationOrderId: result.orderId,
+        error: result.ediSheetError
+          ? `Order created, but EDI sheet sync failed: ${result.ediSheetError}`
+          : undefined,
       }]);
-      showToast(`Order ${payload.orderNumber} submitted! (ShipStation ID: ${result.orderId})`);
+      if (result.ediSheetError) {
+        // Order reached ShipStation but the EDI partner sheet — the actual
+        // deliverable for these retailers — did not get its row. Make it loud.
+        showToast(
+          `Order ${payload.orderNumber} hit ShipStation, but the EDI sheet sync FAILED: ${result.ediSheetError}`,
+          "error"
+        );
+      } else {
+        const ediNote = result.ediSheetSynced ? " + EDI sheet updated" : "";
+        showToast(`Order ${payload.orderNumber} submitted! (ShipStation ID: ${result.orderId})${ediNote}`);
+      }
       return result;
     } catch (err) {
       setRecentOrders((prev) => [...prev, {
