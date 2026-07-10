@@ -288,22 +288,35 @@ function appendEdiRow_(payload) {
   var txnAmount = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
 
   sheet.appendRow([
-    payload.retailer || '',        // 1 Trading Partner
-    '850 Purchase Order',          // 2 EDI Transaction Type / Notes
-    payload.orderNumber || '',     // 3 PO Number
-    '',                            // 4 Invoice Number (blank)
-    txnAmount,                     // 5 Txn Amount
-    new Date(),                    // 6 Received Date (submission timestamp)
-    '',                            // 7 Delivered Date (blank)
-    'Pending',                     // 8 Action Status
-    '',                            // 9 Commission (blank)
-    'Pending',                     // 10 P/P
-    payload.notes || '',           // 11 Notes
+    payload.retailer || '',        // 1  A Trading Partner
+    '850 Purchase Order',          // 2  B EDI Transaction Type / Notes
+    payload.orderNumber || '',     // 3  C PO Number
+    payload.orderNumber || '',     // 4  D Invoice Number (= PO number)
+    txnAmount,                     // 5  E Txn Amount
+    '',                            // 6  F Received Date (set below, date-only)
+    '',                            // 7  G Delivered Date (blank)
+    '',                            // 8  H Action Status (formula, set below)
+    '',                            // 9  I Commission (formula, set below)
+    'Pending',                     // 10 J P/P
+    payload.notes || '',           // 11 K Notes
   ]);
 
-  // Highlight the Action Status cell (column 8) yellow.
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(lastRow, 8).setBackground('#fff3cd');
+  var r = sheet.getLastRow();
+
+  // Received Date (F): date only, no time.
+  var now = new Date();
+  sheet.getRange(r, 6)
+    .setValue(new Date(now.getFullYear(), now.getMonth(), now.getDate()))
+    .setNumberFormat('M/d/yyyy');
+
+  // Action Status (H): Completed once a Delivered Date (G) is set and not in
+  // the future; otherwise Pending. Row-relative so it tracks each row.
+  sheet.getRange(r, 8)
+    .setFormula('=IF(OR(G' + r + '="", G' + r + '>TODAY()), "Pending", "Completed")')
+    .setBackground('#fff3cd');
+
+  // Commission (I): 12% of Txn Amount (E).
+  sheet.getRange(r, 9).setFormula('=E' + r + '*12%');
 }
 
 // ── Get Stores ──────────────────────────────────────────────
