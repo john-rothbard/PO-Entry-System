@@ -1,8 +1,12 @@
 // ============================================================
 // PO ENTRY SYSTEM — Google Apps Script
 // ============================================================
-// This script acts as a secure middleware between the hosted
-// PO form and ShipStation's API.
+// This script serves 3 main purposes:
+// Backend of the PO Entry Form, communicates with:
+// Shipstation: Sends purchase orders from retailers into ship7
+// Asana: Builds a PDF packing list and logs it inside Asana, as well as attaching any PO attachments
+// Sheets: Stores this data in a sheet, as well as tracking PO sales via vendor on multiple(?) other sheets for commission purposes
+// 
 //
 // SETUP:
 // 1. Create a new Google Sheet
@@ -19,11 +23,11 @@
 var CONFIG = {
   // Your ShipStation API key and secret
   // Find at: ShipStation > Settings > Account > API Settings
-  SHIPSTATION_API_KEY: 'YOUR_SHIPSTATION_API_KEY',
-  SHIPSTATION_API_SECRET: 'YOUR_SHIPSTATION_API_SECRET',
+  SHIPSTATION_API_KEY: '',
+  SHIPSTATION_API_SECRET: '',
 
   // Your Google OAuth Client ID (same one used in the React app)
-  GOOGLE_CLIENT_ID: 'GOOGLE_CLIENT_ID',
+  GOOGLE_CLIENT_ID: '555633268289-1qgl84b08oehm88dm3q2ijlhqo508d3f.apps.googleusercontent.com',
 
   // Only allow sign-ins from this Google Workspace domain
   ALLOWED_DOMAIN: 'honeydewsleep.com',
@@ -31,7 +35,7 @@ var CONFIG = {
   // Google Sheet ID — get this from the sheet URL:
   // https://docs.google.com/spreadsheets/d/THIS_PART/edit
   // Required because getActiveSpreadsheet() doesn't work in web app context
-  SPREADSHEET_ID: 'SPREADSHEET_ID',
+  SPREADSHEET_ID: '14QtT7fqfinQQSNR04GiRmylisQdxsFJbp6n3qp9cIgU',
 
   // Allowed origins — add your GitHub Pages URL here after deploying
   // Leave empty to allow all origins (fine for local dev, lock down for production)
@@ -40,10 +44,10 @@ var CONFIG = {
 
   // Asana integration — create tasks from submitted POs
   // Generate a PAT at: https://app.asana.com/0/developer-console
-  ASANA_PAT: 'YOUR_ASANA_PAT',
+  ASANA_PAT: '',
   // Find GIDs in the Asana URL or via the API
-  ASANA_PROJECT_GID: 'ASANA_GID',
-  ASANA_SECTION_GID: 'ASANA_SECT_GID', // "test section" — will become dynamic per-retailer later
+  ASANA_PROJECT_GID: '1206334278029526',
+  ASANA_SECTION_GID: '1213954172458559',
 };
 
 // ── CORS + Security Headers ─────────────────────────────────
@@ -218,31 +222,27 @@ function handleCreateOrder_(payload, userEmail) {
     });
     logAction_('SS Submitted', 'success', payload, userEmail, 'SS#' + result.orderId);
 
-    // ── EDI trading-partner sheet sync (best-effort, isolated) ──
-    // Append one row to the per-retailer EDI spreadsheet when the retailer
-    // has an ediSheetId. Wrapped so a sheet failure can never undo the
-    // ShipStation order — but the failure IS surfaced to the UI (ediSheetError)
-    // per spec, since the sheet row is part of "success" for EDI partners.
-    var ediSheetError = null;
-    var ediSheetSynced = false;
-    if (payload.ediSheetId) {
-      try {
-        appendEdiRow_(payload);
-        ediSheetSynced = true;
-        logAction_('EDI Synced', 'success', payload, userEmail, payload.ediSheetId);
-      } catch (ediErr) {
-        ediSheetError = ediErr.message;
-        logAction_('EDI Synced', 'error', payload, userEmail, ediErr.message);
+      // ── EDI trading-partner sheet sync (best-effort, isolated) ──
+      var ediSheetError = null;
+      var ediSheetSynced = false;
+      if (payload.ediSheetId) {
+        try {
+          appendEdiRow_(payload);
+          ediSheetSynced = true;
+          logAction_('EDI Synced', 'success', payload, userEmail, payload.ediSheetId);
+        } catch (ediErr) {
+          ediSheetError = ediErr.message;
+          logAction_('EDI Synced', 'error', payload, userEmail, ediErr.message);
+        }
       }
-    }
 
     return createCorsResponse({
       success: true,
       orderId: result.orderId,
       orderNumber: result.orderNumber,
       orderKey: result.orderKey,
-      ediSheetSynced: ediSheetSynced,
-      ediSheetError: ediSheetError,
+      ediSheetSynced: ediSheetSynced,   // ← added
+      ediSheetError: ediSheetError,     // ← added
       message: 'Order created in ShipStation',
     });
 
@@ -253,71 +253,54 @@ function handleCreateOrder_(payload, userEmail) {
   }
 }
 
-// ── EDI Sheet Sync ──────────────────────────────────────────
-// Appends one "850 Purchase Order" row to a per-retailer EDI spreadsheet
-// (identified by payload.ediSheetId). Throws on any failure so the caller
-// can surface it to the UI. See EDI_SHEET_COLUMNS for the layout.
 var EDI_SHEET_COLUMNS = [
-  'Trading Partner',              // 1
-  'EDI Transaction Type / Notes', // 2
-  'PO Number',                    // 3
-  'Invoice Number',               // 4
-  'Txn Amount',                   // 5
-  'Received Date',                // 6
-  'Delivered Date',               // 7
-  'Action Status',                // 8
-  'Commission',                   // 9
-  'P/P',                          // 10
-  'Notes',                        // 11
+  'Trading Partner', 'EDI Transaction Type / Notes', 'PO Number',
+  'Invoice Number', 'Txn Amount', 'Received Date', 'Delivered Date',
+  'Action Status', 'Commission', 'P/P', 'Notes',
 ];
 
 function appendEdiRow_(payload) {
-  var ss = SpreadsheetApp.openById(payload.ediSheetId);
-  // Per-partner spreadsheet: write to its first/active sheet.
-  var sheet = ss.getSheets()[0];
+    var ss = SpreadsheetApp.openById(payload.ediSheetId);
+    var sheet = ss.getSheets()[0]; // per-partner spreadsheet → first sheet
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(EDI_SHEET_COLUMNS);
+      sheet.getRange(1, 1, 1, EDI_SHEET_COLUMNS.length).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+    var items = payload.items || [];
+    var itemsTotal = items.reduce(function (s, i) { return s + (i.quantity * i.unitPrice); }, 0);
+    var txnAmount = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
 
-  // Header row (bold + frozen) on first write.
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(EDI_SHEET_COLUMNS);
-    sheet.getRange(1, 1, 1, EDI_SHEET_COLUMNS.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
+    sheet.appendRow([
+      payload.retailer || '',        // A Trading Partner
+      '850 Purchase Order',          // B EDI Transaction Type / Notes
+      payload.orderNumber || '',     // C PO Number
+      payload.orderNumber || '',     // D Invoice Number (= PO number)
+      txnAmount,                     // E Txn Amount
+      '',                            // F Received Date (set below, date-only)
+      '',                            // G Delivered Date (blank)
+      '',                            // H Action Status (formula, set below)
+      '',                            // I Commission (formula, set below)
+      'Pending',                     // J P/P
+      payload.notes || '',           // K Notes
+    ]);
+    var r = sheet.getLastRow();
+
+    // Received Date (F): date only, no time.
+    var now = new Date();
+    sheet.getRange(r, 6)
+      .setValue(new Date(now.getFullYear(), now.getMonth(), now.getDate()))
+      .setNumberFormat('M/d/yyyy');
+
+    // Action Status (H): Completed once Delivered Date (G) is set and not future.
+    sheet.getRange(r, 8)
+      .setFormula('=IF(OR(G' + r + '="", G' + r + '>TODAY()), "Pending", "Completed")')
+      .setBackground('#fff3cd');
+
+    // Commission (I): 12% of Txn Amount (E).
+    sheet.getRange(r, 9).setFormula('=E' + r + '*12%');
   }
 
-  var items = payload.items || [];
-  var itemsTotal = items.reduce(function (s, i) { return s + (i.quantity * i.unitPrice); }, 0);
-  var txnAmount = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
-
-  sheet.appendRow([
-    payload.retailer || '',        // 1  A Trading Partner
-    '850 Purchase Order',          // 2  B EDI Transaction Type / Notes
-    payload.orderNumber || '',     // 3  C PO Number
-    payload.orderNumber || '',     // 4  D Invoice Number (= PO number)
-    txnAmount,                     // 5  E Txn Amount
-    '',                            // 6  F Received Date (set below, date-only)
-    '',                            // 7  G Delivered Date (blank)
-    '',                            // 8  H Action Status (formula, set below)
-    '',                            // 9  I Commission (formula, set below)
-    'Pending',                     // 10 J P/P
-    payload.notes || '',           // 11 K Notes
-  ]);
-
-  var r = sheet.getLastRow();
-
-  // Received Date (F): date only, no time.
-  var now = new Date();
-  sheet.getRange(r, 6)
-    .setValue(new Date(now.getFullYear(), now.getMonth(), now.getDate()))
-    .setNumberFormat('M/d/yyyy');
-
-  // Action Status (H): Completed once a Delivered Date (G) is set and not in
-  // the future; otherwise Pending. Row-relative so it tracks each row.
-  sheet.getRange(r, 8)
-    .setFormula('=IF(OR(G' + r + '="", G' + r + '>TODAY()), "Pending", "Completed")')
-    .setBackground('#fff3cd');
-
-  // Commission (I): 12% of Txn Amount (E).
-  sheet.getRange(r, 9).setFormula('=E' + r + '*12%');
-}
 
 // ── Get Stores ──────────────────────────────────────────────
 function handleGetStores_() {
