@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react';
 import { Icons, Badge, Input, Select, Combobox, Button, Card, Divider } from './components';
-import { US_STATES, EDI_SHEET_DEFAULTS } from './config';
+import { US_STATES, EDI_SHEET_DEFAULTS, EDI_MASTER_SHEET_ID } from './config';
 import { downloadPackingListPdf, getPackingListPdfBase64 } from './packingList';
 
 function AddressFields({ prefix, data, errors, updateField }) {
@@ -288,7 +288,7 @@ export default function POForm({ config, onSubmit, onSendPackingListToAsana, onL
     if (!validate()) return;
     setSubmitting(true);
     const billTo = form.billToSameAsShip ? form.shipTo : form.billTo;
-    const ediSheetId = retailer?.ediSheetId || EDI_SHEET_DEFAULTS[retailer?.id];
+    const ediSheetId = retailer?.ediSheetId || EDI_SHEET_DEFAULTS[retailer?.id] || EDI_MASTER_SHEET_ID;
     const payload = {
       sessionId,
       orderNumber: form.poNumber,

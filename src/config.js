@@ -1,12 +1,16 @@
-// ── EDI Sheet Sync defaults ──────────────────────────────────
-// Baked-in fallback spreadsheet IDs for EDI trading-partner retailers,
-// keyed by retailer id. A retailer's own `ediSheetId` (set in Config →
-// Retailers) always wins; this default is only used when that field is
-// blank. Keyed by id (stable) rather than name to avoid apostrophe/spacing
-// mismatches. Add the other EDI partners here (or via the Config UI).
-export const EDI_SHEET_DEFAULTS = {
-  ret_1040656: "1pvs6znQ2Dk7N12cMiUGbrH7X5j6BhozEo1pqpV2fADg", // Retail - Sit 'n Sleep
-};
+// ── EDI Sheet Sync ───────────────────────────────────────────
+// Every EDI PO lands in ONE master commission-tracker spreadsheet. Inside it,
+// each retailer gets its own tab (named after the retailer), auto-created on
+// that retailer's first PO by the Apps Script side. So every retailer syncs by
+// default — no per-retailer setup required.
+export const EDI_MASTER_SHEET_ID = "1pvs6znQ2Dk7N12cMiUGbrH7X5j6BhozEo1pqpV2fADg";
+
+// Optional per-retailer overrides: point a specific retailer at a *different*
+// spreadsheet than the master. A retailer's own `ediSheetId` (Config →
+// Retailers) wins over this, and this wins over EDI_MASTER_SHEET_ID. Keyed by
+// retailer id (stable) rather than name to avoid apostrophe/spacing mismatches.
+// Usually empty now that everyone shares the master sheet.
+export const EDI_SHEET_DEFAULTS = {};
 
 export const DEFAULT_CONFIG = {
   retailers: [

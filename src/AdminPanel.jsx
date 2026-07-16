@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icons, Badge, Input, Button, Divider } from './components';
-import { EDI_SHEET_DEFAULTS } from './config';
+import { EDI_SHEET_DEFAULTS, EDI_MASTER_SHEET_ID } from './config';
 
 export default function AdminPanel({ config, setConfig, onClose, onFetchStores, onFetchProducts }) {
   const [tab, setTab] = useState("retailers");
@@ -151,7 +151,7 @@ export default function AdminPanel({ config, setConfig, onClose, onFetchStores, 
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {config.retailers.map((r) => {
-                  const ediDefault = EDI_SHEET_DEFAULTS[r.id];
+                  const ediDefault = EDI_SHEET_DEFAULTS[r.id] || EDI_MASTER_SHEET_ID;
                   const ediActive = r.ediSheetId || ediDefault;
                   return (
                   <div key={r.id} style={{
