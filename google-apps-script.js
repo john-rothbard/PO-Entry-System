@@ -255,7 +255,7 @@ function handleCreateOrder_(payload, userEmail) {
 
 var EDI_SHEET_COLUMNS = [
   'Trading Partner', 'EDI Transaction Type / Notes', 'PO Number',
-  'Invoice Number', 'Txn Amount', 'Received Date', 'Delivered Date',
+  'Invoice Number', 'Txn Amount', 'Received Date', 'Ship By',
   'Action Status', 'Commission', 'P/P', 'Notes',
 ];
 
@@ -278,7 +278,7 @@ function appendEdiRow_(payload) {
       payload.orderNumber || '',     // D Invoice Number (= PO number)
       txnAmount,                     // E Txn Amount
       '',                            // F Received Date (set below, date-only)
-      '',                            // G Delivered Date (blank)
+      '',                            // G Ship By (set below, date-only, from PO system)
       '',                            // H Action Status (formula, set below)
       '',                            // I Commission (formula, set below)
       'Pending',                     // J P/P
@@ -292,7 +292,16 @@ function appendEdiRow_(payload) {
       .setValue(new Date(now.getFullYear(), now.getMonth(), now.getDate()))
       .setNumberFormat('M/d/yyyy');
 
-    // Action Status (H): Completed once Delivered Date (G) is set and not future.
+    // Ship By (G): date only, sourced from the PO system (payload.shipByDate).
+    var shipBy = String(payload.shipByDate || '').substring(0, 10); // YYYY-MM-DD
+    if (shipBy) {
+      var p = shipBy.split('-');
+      sheet.getRange(r, 7)
+        .setValue(new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])))
+        .setNumberFormat('M/d/yyyy');
+    }
+
+    // Action Status (H): Completed once Ship By (G) is set and not future.
     sheet.getRange(r, 8)
       .setFormula('=IF(OR(G' + r + '="", G' + r + '>TODAY()), "Pending", "Completed")')
       .setBackground('#fff3cd');
