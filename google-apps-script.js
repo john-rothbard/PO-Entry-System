@@ -48,6 +48,10 @@ var CONFIG = {
   // Find GIDs in the Asana URL or via the API
   ASANA_PROJECT_GID: '1206334278029526',
   ASANA_SECTION_GID: '1213954172458559',
+
+  // "PO & Commission Tracker" spreadsheet (Sit 'n Sleep / Jerome's / Mattress
+  // Nation tabs). Orders for retailers in COMMISSION_TRACKER_TABS also land here.
+  COMMISSION_TRACKER_ID: 'COMMISSION_TRACKER_SPREADSHEET_ID',
 };
 
 // ── CORS + Security Headers ─────────────────────────────────
@@ -236,6 +240,18 @@ function handleCreateOrder_(payload, userEmail) {
         }
       }
 
+      // ── Commission tracker sync (mapped retailers only, isolated) ──
+      // Failures ride along on ediSheetError so the existing red toast shows them.
+      try {
+        var ctRow = appendCommissionTrackerRow_(payload);
+        if (ctRow) {
+          logAction_('Commission Synced', 'success', payload, userEmail, 'row ' + ctRow);
+        }
+      } catch (ctErr) {
+        ediSheetError = (ediSheetError ? ediSheetError + '; ' : '') + 'Commission tracker: ' + ctErr.message;
+        logAction_('Commission Synced', 'error', payload, userEmail, ctErr.message);
+      }
+
     return createCorsResponse({
       success: true,
       orderId: result.orderId,
@@ -259,9 +275,24 @@ var EDI_SHEET_COLUMNS = [
   'Action Status', 'Commission', 'P/P', 'Notes',
 ];
 
+// Google Sheet tab names can't contain: [ ] : \ / ? * and max 100 chars.
+function ediTabName_(retailerName) {
+  var n = String(retailerName || '').replace(/[\[\]\/\\?*:]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if (!n) n = 'Unknown Retailer';
+  return n.substring(0, 100);
+}
+
+// Return the retailer's tab in this spreadsheet, creating it if absent.
+function getOrCreateEdiTab_(ss, retailerName) {
+  var name = ediTabName_(retailerName);
+  return ss.getSheetByName(name) || ss.insertSheet(name);
+}
+
 function appendEdiRow_(payload) {
     var ss = SpreadsheetApp.openById(payload.ediSheetId);
-    var sheet = ss.getSheets()[0]; // per-partner spreadsheet → first sheet
+    // One master spreadsheet, one tab per retailer (auto-created on first PO).
+    var sheet = getOrCreateEdiTab_(ss, payload.retailer);
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(EDI_SHEET_COLUMNS);
       sheet.getRange(1, 1, 1, EDI_SHEET_COLUMNS.length).setFontWeight('bold');
@@ -309,6 +340,73 @@ function appendEdiRow_(payload) {
     // Commission (I): 12% of Txn Amount (E).
     sheet.getRange(r, 9).setFormula('=E' + r + '*12%');
   }
+
+// ── Commission tracker sync ─────────────────────────────────
+// Hand-maintained tracker, one tab per partner. Layout differs from the EDI
+// master: header on row 2, data in B..M. Keyed by ShipStation storeId; the
+// wording per tab mirrors the rows already in it.
+var COMMISSION_TRACKER_TABS = {
+  '1040656': { gid: 1364836370, partner: "Sit 'n Sleep",    txnType: '850 Purchase Order', received: 'PO Received', shipped: '',          invoiceIsPo: false },
+  '1053710': { gid: 1596208664, partner: 'Mattress Nation', txnType: '850 Purchase Order', received: 'Received',    shipped: 'Delivered', invoiceIsPo: true  },
+  '1040660': { gid: 1513107610, partner: "Jerome's",        txnType: '',                   received: 'PO Received', shipped: '',          invoiceIsPo: false },
+};
+
+// Returns the row written, false when the retailer isn't mapped; throws on failure.
+function appendCommissionTrackerRow_(payload) {
+  var tab = COMMISSION_TRACKER_TABS[String((payload.advancedOptions || {}).storeId)];
+  if (!tab) return false;
+
+  var ss = SpreadsheetApp.openById(CONFIG.COMMISSION_TRACKER_ID);
+  var sheet = ss.getSheets().filter(function (s) { return s.getSheetId() === tab.gid; })[0];
+  if (!sheet) throw new Error('tab not found (gid ' + tab.gid + ')');
+
+  // Tabs have pre-filled formula rows below the data, so appendRow would land
+  // far down. Write one row below the LAST filled Trading Partner (B) cell —
+  // never into a gap, so no existing row can be overwritten.
+  var colB = sheet.getRange(1, 2, Math.max(sheet.getLastRow(), 2), 1).getValues();
+  var r = colB.length;
+  while (r > 2 && String(colB[r - 1][0]).trim() === '') r--;
+  r++;
+
+  var items = payload.items || [];
+  var itemsTotal = items.reduce(function (s, i) { return s + (i.quantity * i.unitPrice); }, 0);
+  var txnAmount = itemsTotal + (payload.shippingAmount || 0) + (payload.taxAmount || 0);
+
+  var now = new Date();
+  var received = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var shipBy = '';
+  var sb = String(payload.shipByDate || '').substring(0, 10).split('-'); // YYYY-MM-DD
+  if (sb.length === 3) shipBy = new Date(Number(sb[0]), Number(sb[1]) - 1, Number(sb[2]));
+
+  var po = String(payload.orderNumber || '');
+  // PO/Invoice as plain text so leading zeros (Jerome's POs) survive.
+  sheet.getRange(r, 4, 1, 2).setNumberFormat('@');
+  sheet.getRange(r, 2, 1, 9).setValues([[
+    tab.partner,                   // B Trading Partner
+    tab.txnType,                   // C EDI Transaction Type / Notes
+    po,                            // D PO Number
+    tab.invoiceIsPo ? po : '',     // E Invoice Number
+    txnAmount,                     // F Txn Amount
+    received,                      // G Action Date (received)
+    tab.received,                  // H Action Type
+    shipBy,                        // I Action Date (ship by)
+    tab.shipped,                   // J Action Type
+  ]]);
+  sheet.getRange(r, 6).setNumberFormat('$#,##0.00');
+  sheet.getRange(r, 7).setNumberFormat('M/d/yyyy');
+  sheet.getRange(r, 9).setNumberFormat('M/d/yyyy');
+
+  // Action Status (K) / Commission (L): keep any formula the tab already has.
+  var existing = sheet.getRange(r, 11, 1, 2).getFormulas()[0];
+  if (!existing[0]) {
+    sheet.getRange(r, 11).setFormula('=IF(OR(I' + r + '="", I' + r + '>TODAY()), "Pending", "Completed")');
+  }
+  if (!existing[1]) {
+    // 4% matches the existing rows on all three tabs.
+    sheet.getRange(r, 12).setFormula('=F' + r + '*4%').setNumberFormat('$#,##0.00');
+  }
+  return r;
+}
 
 
 // ── Get Stores ──────────────────────────────────────────────
